@@ -8,13 +8,13 @@ bridge as a crate in the RustGIS tree.
 [GRASS_INTERFACE.md](GRASS_INTERFACE.md) is the survey of RustGIS's extension points this was
 designed from, written before the prototype and partly superseded by it.
 
-![The GRASS GIS panel on the right of RustGIS, listing the IGN project's PERMANENT mapset with
-forest_ndvi chosen, and that map drawn on the map canvas; the Plugins ribbon tab above carries the
-GRASS GIS Tools group](plugin_grassgis_access_datasets.png)
+![RustGIS with the plugin's own GRASS ribbon tab open, showing the Database, Region, Raster and
+Vector groups, above the World Atlas sample map](plugin_grassgis_030.png)
 
-Above, `forest_ndvi` has been taken out of the `IGN` project's `PERMANENT` mapset and drawn with
-a ramp over its own −0.33 to 0.84. (The screenshot predates the plugin's own **GRASS** tab, which
-now holds what is shown there in the Plugins group.)
+Above is the plugin's own **GRASS** ribbon tab: **Database** opens the GRASS database panel and
+adds a map from it, **Region** sets the computational region from the map view or a layer,
+**Raster** runs slope, aspect and viewshed or any module the panel can drive, and **Vector**
+holds the generated tools, grouped by what they do.
 
 GRASS is not bundled, linked or copied here. Each run spawns the `grass` launcher already
 installed on the machine, and every tool's form is read from that installation at build time with
