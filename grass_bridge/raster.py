@@ -23,6 +23,7 @@ nothing here writes slots itself.
 SPDX-License-Identifier: Unlicense
 """
 
+import math
 import os
 import time
 
@@ -49,6 +50,12 @@ OPERATIONS = {
 
 #: A slider gives whole numbers, so the maximum distance is in kilometres.
 METRES_PER_KM = 1000.0
+
+#: Metres in one degree of latitude, and of longitude at the equator. Used only
+#: to turn the Analysis Environment's cell size, which is in degrees, into the
+#: units of a projected raster.
+METRES_PER_DEGREE_LAT = 110540.0
+METRES_PER_DEGREE_LON = 111320.0
 
 
 def choose_raster(layers, chosen=None):
@@ -187,7 +194,7 @@ class RasterRun(session.Run):
             grass=grass, progress=progress, deadline=time.monotonic() + budget
         )
 
-    def raster_tool(self, command, source, target, values=None, centre=None):
+    def raster_tool(self, command, source, target, values=None, centre=None, env=None):
         """Run one raster module over a GeoTIFF and write another.
 
         :param command: the local command id, a key of :data:`OPERATIONS`
@@ -196,6 +203,8 @@ class RasterRun(session.Run):
         :param values: the panel's widget values
         :param centre: the map's centre as ``(longitude, latitude)``, for a
             module that works from a point
+        :param env: RustGIS's Analysis Environment, as ``gp.env`` answers it:
+            ``{"extent": [w, s, e, n], "cellSize": degrees}``
         :return: ``[message, ...]``
         :raises session.GrassError: when any step fails
         """
@@ -225,12 +234,19 @@ class RasterRun(session.Run):
         # and writes. A new project's region is a single cell at the origin.
         self.exec(project, "g.region", "raster=src")
         region = self._region(project)
+        region, region_notes, narrowed = self._apply_environment(
+            project, region, proj, env, (values or {}).get("res")
+        )
 
         point = None
         if centre is not None and module == "r.viewshed":
             point = self._project_point(project, centre, region)
 
         argv, notes = module_args(command, values, point)
+        if narrowed and module == "r.slope.aspect":
+            # Otherwise it puts the region back on the elevation map's own grid
+            # and the region asked for is silently ignored.
+            argv.append("-a")
         self.progress(f"Running {module}...")
         self.exec(project, module, *argv, "--overwrite", "--quiet")
 
@@ -254,18 +270,172 @@ class RasterRun(session.Run):
         messages = [f"{module} ran in {where}."]
         if region:
             messages.append(
-                "Computational region taken from the raster: "
+                "Computational region used: "
                 f"{region.get('cols', '?')} by {region.get('rows', '?')} cells of "
                 f"{region.get('ewres', '?')} by {region.get('nsres', '?')}, "
                 f"{float(region.get('w', 0)):.0f} to {float(region.get('e', 0)):.0f} east, "
                 f"{float(region.get('s', 0)):.0f} to {float(region.get('n', 0)):.0f} north."
             )
+        messages += region_notes
         messages += notes
         for text, count in self.warnings.items():
             messages.append(
                 f"GRASS: {text}" + (f" ({count} times)" if count > 1 else "")
             )
         return messages
+
+    def _apply_environment(self, project, region, proj, env, res):
+        """Narrow the region to RustGIS's Analysis Environment and the panel.
+
+        The region, not the input, decides what a GRASS raster module reads and
+        writes, so this is where **Analyze > Geoprocessing > Environments**
+        reaches GRASS: its extent becomes the region's bounds and its cell size
+        the resolution. The panel's own cell size wins over both.
+
+        :param region: the region taken from the raster
+        :param proj: the project's PROJ.4 description
+        :param env: ``gp.env``'s answer, or None
+        :param res: the panel's cell size, in the project's units, or 0
+        :return: ``(region, [note, ...], narrowed)``
+        :raises session.GrassError: when nothing of the raster is left
+        """
+        env = env or {}
+        extent = env.get("extent")
+        cell = env.get("cellSize")
+        notes, narrowed = [], False
+        degrees = "+proj=longlat" in proj
+
+        if extent and len(extent) == 4:
+            box = self._box(project, extent, region)
+            self.exec(
+                project,
+                "g.region",
+                f"n={box['n']:.6f}",
+                f"s={box['s']:.6f}",
+                f"e={box['e']:.6f}",
+                f"w={box['w']:.6f}",
+                "align=src",
+            )
+            narrowed = True
+            notes.append(
+                "The region is the Analysis Environment's extent "
+                f"({extent[0]:.5f}, {extent[1]:.5f}) to ({extent[2]:.5f}, {extent[3]:.5f}), "
+                "clipped to the raster and aligned to its grid."
+            )
+
+        if res:
+            self.exec(project, "g.region", f"res={float(res):g}", "-a")
+            narrowed = True
+            notes.append(f"Cell size {float(res):g} (the panel's), aligned to it.")
+        elif cell:
+            ns, ew, how = self._cell_size(project, cell, degrees, region)
+            self.exec(project, "g.region", f"nsres={ns:.10g}", f"ewres={ew:.10g}", "-a")
+            narrowed = True
+            notes.append(
+                f"Cell size from the Analysis Environment: {cell:g} degrees, {how}."
+            )
+
+        if narrowed:
+            region = self._region(project)
+            if region.get("cells") in ("0", None) or region.get("rows") == "0":
+                raise session.GrassError(
+                    "the region asked for leaves no cell of the raster; widen the "
+                    "Analysis Environment's extent or move the map over the data"
+                )
+        else:
+            notes.append(
+                "The region is the whole raster: no extent or cell size is set in "
+                "Analyze > Geoprocessing > Environments."
+            )
+        return region, notes, narrowed
+
+    def _cell_size(self, project, cell, degrees, region):
+        """Return ``(nsres, ewres, how)`` for a cell size given in degrees.
+
+        The Analysis Environment states a cell size in degrees, which means
+        nothing to a projected raster, so it is turned into that projection's
+        units at the latitude of the region's centre. A degree of longitude
+        shortens away from the equator; a degree of latitude does not.
+        """
+        if degrees:
+            return cell, cell, "the raster is in degrees, so it is taken as it is"
+        lat = self._centre_latitude(project, region)
+        ns = cell * METRES_PER_DEGREE_LAT
+        ew = cell * METRES_PER_DEGREE_LON * math.cos(math.radians(lat))
+        how = (
+            f"{ns:.1f} north-south by {ew:.1f} east-west in the raster's units, "
+            f"at latitude {lat:.2f} degrees"
+        )
+        return ns, ew, how
+
+    def _centre_latitude(self, project, region):
+        """Return the latitude of the region's centre, or 0 when unreadable."""
+        try:
+            east = (float(region["w"]) + float(region["e"])) / 2.0
+            north = (float(region["s"]) + float(region["n"])) / 2.0
+        except (KeyError, ValueError):
+            return 0.0
+        try:
+            out = self.exec(
+                project,
+                "m.proj",
+                "-o",
+                "-d",
+                f"coordinates={east},{north}",
+                "separator=comma",
+            )
+            return float(out.strip().splitlines()[0].split(",")[1])
+        except (session.GrassError, IndexError, ValueError):
+            return 0.0
+
+    def _box(self, project, extent, region):
+        """Return the longitude/latitude extent, projected and clipped.
+
+        :raises session.GrassError: when it does not meet the raster
+        """
+        west, south, east, north = (float(v) for v in extent)
+        corners = [
+            (west, south),
+            (west, north),
+            (east, south),
+            (east, north),
+            ((west + east) / 2.0, south),
+            ((west + east) / 2.0, north),
+        ]
+        xs, ys = [], []
+        for lon, lat in corners:
+            out = self.exec(
+                project,
+                "m.proj",
+                "-i",
+                "-d",
+                f"coordinates={lon},{lat}",
+                "separator=comma",
+            )
+            parts = (out.strip().splitlines() or [""])[0].split(",")
+            try:
+                xs.append(float(parts[0]))
+                ys.append(float(parts[1]))
+            except (IndexError, ValueError) as e:
+                raise session.GrassError(
+                    "cannot put the Analysis Environment's extent into the raster's "
+                    f"projection: m.proj answered {out.strip()!r}"
+                ) from e
+        try:
+            box = {
+                "w": max(min(xs), float(region["w"])),
+                "e": min(max(xs), float(region["e"])),
+                "s": max(min(ys), float(region["s"])),
+                "n": min(max(ys), float(region["n"])),
+            }
+        except (KeyError, ValueError) as e:
+            raise session.GrassError("the raster has no readable region") from e
+        if box["w"] >= box["e"] or box["s"] >= box["n"]:
+            raise session.GrassError(
+                "the Analysis Environment's extent does not meet the raster; widen "
+                "it, or set it to the layer (Analyze > Geoprocessing > Environments)"
+            )
+        return box
 
     def _region(self, project):
         """Return ``g.region -g`` as a dictionary."""

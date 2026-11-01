@@ -6,6 +6,11 @@ rustgis-grass-plugin (0.1.0) unstable; urgency=medium
     A plugin tool can take no raster and make no host request, so these export
     the chosen layer, run the module and add the GeoTIFF back, inside the two
     minutes RustGIS allows a command.
+  * The computational region comes from RustGIS's Analysis Environment: its
+    extent becomes the region's bounds, clipped to the raster and aligned to
+    its grid, and its cell size the resolution, converted to the raster's own
+    units. The panel can set the extent to the map view or clear it, and
+    carries a cell size of its own that wins over both.
   * Each run reports the projection it worked in, the computational region it
     set and every distinct GRASS warning with a count. The region is never
     left at its default: a fresh project's one-cell region silently drops

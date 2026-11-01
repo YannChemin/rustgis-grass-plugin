@@ -36,9 +36,9 @@ Three raster modules as **commands**, driven from the **GRASS Raster** panel:
 | Aspect | `r.slope.aspect` | the direction each cell faces, clockwise from north |
 | Viewshed | `r.viewshed` | what is visible from the centre of the map |
 
-The panel chooses the raster layer, the slope's unit, the viewer's height and the viewshed's
-range. A command opens no dialog, so without a panel these could only ever run with fixed
-defaults.
+The panel chooses the raster layer, the computational region, the slope's unit, the viewer's
+height and the viewshed's range. A command opens no dialog, so without a panel these could only
+ever run with fixed defaults.
 
 ## Install
 
@@ -106,7 +106,8 @@ command its permissions allow, which is enough to carry a raster in and out:
 2. `share.exportRaster` writes it as a GeoTIFF (`files`).
 3. A throwaway GISDBASE is made, with a project taking **the raster's own coordinate system**, so
    nothing is reprojected on the way in or out. `r.in.gdal` imports it and `g.region raster=…`
-   sets the region from it.
+   sets the region from it, which **Analyze › Geoprocessing › Environments** then narrows (see
+   below).
 4. The module runs, and `r.out.gdal` writes the result.
 5. `layer.addData` adds that file as a raster layer (`files` and `edit`), and the run reports the
    projection, the region's cells and extent, what the numbers mean, and each distinct GRASS
@@ -114,6 +115,35 @@ command its permissions allow, which is enough to carry a raster in and out:
 
 The result stays in `~/.cache/rustgis-grass-plugin/`, because RustGIS reads the file when the
 layer is added and keeps the path; each message says where it is.
+
+### The computational region
+
+A GRASS raster module takes its extent and resolution from `g.region`, not from its inputs, so
+that is what RustGIS's own **Analysis Environment** sets. Every run reads `gp.env` and applies it:
+
+| In RustGIS | In GRASS |
+|---|---|
+| **Environments › Extent** (`view`, `full`, a layer, or four numbers) | `g.region n= s= e= w= align=src`, clipped to the raster and snapped to its grid |
+| **Environments › Cell Size** (degrees) | `g.region nsres= ewres= -a`, converted to the raster's units at the region's latitude |
+| The panel's **Cell size** slider (the raster's own units, 0 = off) | `g.region res= -a`, overriding the environment |
+
+The panel's **Region = Map View** and **Region = Whole Layer** buttons set the environment's
+extent to the view or clear it, so the region can be driven without leaving the panel, and the
+panel shows the region in force. A degree of longitude shortens away from the equator, so a cell
+size of 0.001° over a UTM raster at 43.31° N becomes 110.5 m north-south by 81.0 m east-west, and
+the run says so.
+
+Two consequences worth knowing:
+
+- `r.slope.aspect` puts the region back on the elevation map's own grid unless it is given `-a`.
+  The bridge passes `-a` whenever the region was narrowed, or the cell size asked for would be
+  silently ignored.
+- An extent that does not meet the raster is an error naming where to change it, not an empty
+  result.
+
+The vector tools get the extent for free and never see the cell size: RustGIS filters a tool's
+features by the environment's extent before the tool runs (471 features of the sample `Cities`
+layer become 80 under a European extent), and the region is then set from what arrives.
 
 ### The two-minute cap
 

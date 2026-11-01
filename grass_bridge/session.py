@@ -205,6 +205,29 @@ def centre_of(geojson):
     return (sum(lons) / len(lons), sum(lats) / len(lats))
 
 
+def _warnings(text):
+    """Return the whole of each warning GRASS wrote.
+
+    GRASS wraps a long warning over several lines, continuing it indented
+    under the first, so taking only the line holding ``WARNING`` cuts the
+    sentence in half.
+
+    :param text: a module's error output
+    :return: one tidy line per warning, in the order they were written
+    """
+    out, inside = [], False
+    for line in text.splitlines():
+        if "WARNING" in line:
+            out.append(line.split("WARNING:", 1)[-1].strip())
+            inside = True
+        elif inside and line.startswith((" ", "\t")) and line.strip():
+            out[-1] = f"{out[-1]} {line.strip()}"
+        elif line.strip():
+            # Any other output ends the warning being continued.
+            inside = False
+    return [line for line in out if line]
+
+
 def _why(out):
     """Return the most useful line of a failed run's output."""
     text = (out.stderr or "") + (out.stdout or "")
@@ -289,10 +312,8 @@ class Run:
             raise GrassError(f"{module}: {e}") from e
         if out.returncode != 0:
             raise GrassError(f"{module}: {_why(out)}")
-        for line in (out.stderr or "").splitlines():
-            if "WARNING" in line:
-                text = line.strip().removeprefix("WARNING:").strip()
-                self.warnings[text] = self.warnings.get(text, 0) + 1
+        for text in _warnings(out.stderr or ""):
+            self.warnings[text] = self.warnings.get(text, 0) + 1
         return out.stdout
 
     def vector_tool(self, module, geojson, params, flags=()):

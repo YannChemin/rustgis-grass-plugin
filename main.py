@@ -126,6 +126,34 @@ def run_tool(req, modules):
     }
 
 
+def describe_region(env):
+    """Return one line saying what region a run would use."""
+    env = env or {}
+    extent, cell = env.get("extent"), env.get("cellSize")
+    where = (
+        "Extent: {:.5f}, {:.5f} to {:.5f}, {:.5f}".format(*extent)
+        if extent and len(extent) == 4
+        else "Extent: the whole input raster"
+    )
+    size = f"Cell size: {cell:g} degrees" if cell else "Cell size: the raster's own"
+    return f"{where}\n{size}"
+
+
+def set_region(req, extent):
+    """Set the Analysis Environment's extent and answer the panel.
+
+    :param extent: ``"view"`` for the map view, or None for the whole layer
+    """
+    env = call("gp.env", {"extent": extent})
+    told = "the map view" if extent == "view" else "the whole layer"
+    text = describe_region(env)
+    call("host.notify", {"text": f"Computational region: {told}."})
+    return {
+        "environment": env,
+        "panel": {"items": {"region": {"text": text}}},
+    }
+
+
 def run_raster_command(req):
     """Run one GRASS raster module over a raster layer of the map.
 
@@ -145,6 +173,9 @@ def run_raster_command(req):
     nodes = raster.raster_nodes(layers)
     layer = raster.choose_raster(layers, values.get("raster"))
     name = str(layer.get("name"))
+    # The computational region decides what a raster module reads and writes,
+    # so RustGIS's own Analysis Environment is what sets it.
+    env = call("gp.env", {}) or {}
 
     exported = os.path.join(raster.output_dir(), f".export-{os.getpid()}.tif")
     target = raster.output_path(name, operation["suffix"])
@@ -159,7 +190,7 @@ def run_raster_command(req):
     call("share.exportRaster", {"layer": name, "path": exported})
     try:
         with raster.RasterRun(progress=progress) as run:
-            messages = run.raster_tool(command, exported, target, values, centre)
+            messages = run.raster_tool(command, exported, target, values, centre, env)
     finally:
         try:
             os.remove(exported)
@@ -181,6 +212,7 @@ def run_raster_command(req):
             "items": {
                 "raster": {"nodes": nodes},
                 "source": {"text": name},
+                "region": {"text": describe_region(env)},
                 "status": {"text": "\n".join(messages)},
             },
         },
@@ -206,6 +238,7 @@ def panel_state(req):
             chosen = str(active[0].get("id"))
         elif len(nodes) == 1:
             chosen = nodes[0]["id"]
+    env = call("gp.env", {}) or {}
     installed = session.version()
     status = (
         f"GRASS GIS {installed}."
@@ -225,6 +258,7 @@ def panel_state(req):
                         "No raster chosen",
                     )
                 },
+                "region": {"text": describe_region(env)},
                 "status": {"text": status},
             },
         }
@@ -236,6 +270,10 @@ def run_command(req):
     command = req.get("id")
     if command == "raster-state":
         return panel_state(req)
+    if command == "region-view":
+        return set_region(req, "view")
+    if command == "region-full":
+        return set_region(req, None)
     if command in raster.OPERATIONS:
         return run_raster_command(req)
     raise ValueError(f"unknown command '{command}'")

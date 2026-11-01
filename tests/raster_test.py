@@ -124,3 +124,87 @@ def test_a_run_without_a_deadline_gets_the_module_timeout():
     run = session.Run.__new__(session.Run)
     run.deadline = None
     assert run.left() == session.TIMEOUT
+
+
+class FakeRun(raster.RasterRun):
+    """A run that answers m.proj itself, so the region logic needs no GRASS."""
+
+    def __init__(self, answers):
+        self.answers = answers
+        self.calls = []
+        self.deadline = None
+        self.warnings = {}
+
+    def exec(self, project, module, *args):
+        self.calls.append((module, args))
+        answer = self.answers.get(module, "")
+        # A list answers one call after another, as projecting corners does.
+        if isinstance(answer, list):
+            return answer[min(len(self.calls), len(answer)) - 1]
+        return answer
+
+
+REGION = {"w": "500000", "e": "510000", "s": "4790000", "n": "4800000"}
+
+
+def test_a_cell_size_in_degrees_is_kept_for_a_raster_in_degrees():
+    ns, ew, how = FakeRun({})._cell_size(None, 0.001, True, REGION)
+    assert (ns, ew) == (0.001, 0.001)
+    assert "taken as it is" in how
+
+
+def test_a_cell_size_in_degrees_shortens_eastwards_for_a_projected_raster():
+    run = FakeRun({"m.proj": "3.03,43.31\n"})
+    ns, ew, how = run._cell_size("p", 0.001, False, REGION)
+    assert ns == pytest.approx(110.54)
+    assert ew == pytest.approx(81.0, abs=0.5)  # 111320 * cos(43.31 degrees)
+    assert ew < ns and "43.31" in how
+
+
+def test_an_unreadable_latitude_falls_back_to_the_equator():
+    ns, ew, _ = FakeRun({"m.proj": "rubbish"})._cell_size("p", 0.001, False, REGION)
+    assert ew == pytest.approx(raster.METRES_PER_DEGREE_LON * 0.001)
+    assert ns == pytest.approx(raster.METRES_PER_DEGREE_LAT * 0.001)
+
+
+def test_an_environment_extent_is_clipped_to_the_raster():
+    # The corners project to a box reaching past the raster to the west and
+    # south, and stopping short of it to the east and north.
+    run = FakeRun(
+        {
+            "m.proj": [
+                "495000,4785000\n",
+                "495000,4795000\n",
+                "505000,4785000\n",
+                "505000,4795000\n",
+                "500000,4785000\n",
+                "500000,4795000\n",
+            ]
+        }
+    )
+    box = run._box("p", [2.9, 43.2, 3.1, 43.4], REGION)
+    assert box == {"w": 500000.0, "e": 505000.0, "s": 4790000.0, "n": 4795000.0}
+
+
+def test_an_extent_that_misses_the_raster_is_an_error_that_says_where_to_set_it():
+    run = FakeRun({"m.proj": "100,200\n"})
+    with pytest.raises(session.GrassError) as e:
+        run._box("p", [-70, -30, -60, -20], REGION)
+    assert "Environments" in str(e.value)
+
+
+def test_a_warning_wrapped_over_several_lines_is_kept_whole():
+    text = (
+        "WARNING: East-west resolution does not equal north-south resolution.\n"
+        "         The viewshed will be computed anyway.\n"
+        "Reading elevation map...\n"
+    )
+    whole = (
+        "East-west resolution does not equal north-south resolution. "
+        "The viewshed will be computed anyway."
+    )
+    assert session._warnings(text) == [whole]
+
+
+def test_an_indented_line_after_other_output_is_not_taken_for_a_warning():
+    assert session._warnings("Reading...\n   100%\n") == []

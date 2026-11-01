@@ -53,6 +53,22 @@ COMMANDS = [
         "params": "{} (the GRASS Raster panel chooses the layer, the viewer's height and the range)",
     },
     {
+        "id": "region-view",
+        "label": "Region =\nMap View",
+        "help": "Set the Analysis Environment's extent to what the map shows, "
+        "which becomes the computational region of every GRASS raster run.",
+        "icon": "zoom_full",
+        "params": "{}",
+    },
+    {
+        "id": "region-full",
+        "label": "Region =\nWhole Layer",
+        "help": "Clear the Analysis Environment's extent, so a run covers the "
+        "whole input raster.",
+        "icon": "zoom_world",
+        "params": "{}",
+    },
+    {
         "id": "raster-state",
         "label": "Refresh\nRasters",
         "help": "List the map's raster layers in the GRASS Raster panel again.",
@@ -78,6 +94,27 @@ PANEL = {
             "command": "raster-state",
         },
         {"kind": "text", "id": "source", "label": "Chosen layer"},
+        {
+            "kind": "text",
+            "id": "region",
+            "label": "Computational region",
+            "help": "What the region will be: the Analysis Environment's extent "
+            "and cell size, which Analyze > Geoprocessing > Environments sets.",
+        },
+        {"kind": "button", "command": "region-view"},
+        {"kind": "button", "command": "region-full"},
+        {
+            "kind": "slider",
+            "id": "res",
+            "label": "Cell size in the raster's own units (0: from the environment)",
+            "help": "Overrides the Analysis Environment's cell size. The region "
+            "is aligned to it, and r.slope.aspect is stopped from putting the "
+            "region back on the elevation map's grid.",
+            "min": 0,
+            "max": 1000,
+            "default": 0,
+            "steps": True,
+        },
         {
             "kind": "checkbox",
             "id": "percent",
