@@ -42,6 +42,19 @@ defaults.
 
 ## Install
 
+From the package, on Debian or Ubuntu:
+
+```sh
+sudo apt install ./dist/rustgis-grass-plugin_0.1.0_all.deb
+rustgis-grass-setup          # once per user; again after upgrading GRASS
+```
+
+`rustgis-grass-setup` generates the manifest from the GRASS installed here and registers the
+plugin with RustGIS. The package carries no manifest, because a module's parameter labels are
+part of GRASS's own GPL documentation; `rustgis-grass-setup --remove` undoes both steps.
+
+### From the source tree
+
 Needs GRASS GIS 8 and Python 3 on the machine. `RUSTGIS_GRASS` names the launcher if it is not
 on the `PATH`.
 

@@ -1,0 +1,55 @@
+#!/bin/sh
+# Set up the GRASS GIS plugin for the user running this command.
+#
+# The plugin's manifest is read from the GRASS installation on this machine
+# rather than shipped, because a module's parameter labels are part of GRASS's
+# GPL documentation. The code is therefore copied out of /usr/share into a
+# folder this user can write to, the manifest is generated there, and RustGIS
+# is told where it is.
+#
+# SPDX-License-Identifier: Unlicense
+
+set -e
+
+src=/usr/share/rustgis-grass-plugin
+dst="${XDG_DATA_HOME:-$HOME/.local/share}/rustgis-grass-plugin"
+
+usage() {
+	echo "Usage: rustgis-grass-setup [--remove]"
+	echo
+	echo "Generates the plugin's manifest from the GRASS installed here and"
+	echo "registers the plugin with RustGIS, for the current user."
+	echo "  --remove   unregister it and delete $dst"
+}
+
+case "${1:-}" in
+	--help|-h) usage; exit 0 ;;
+	--remove)
+		rustgis-cli plugins uninstall grass-vector || true
+		rm -rf "$dst"
+		echo "Removed the plugin and $dst."
+		exit 0 ;;
+	"") ;;
+	*) usage >&2; exit 2 ;;
+esac
+
+for program in python3 rustgis-cli; do
+	command -v "$program" >/dev/null || {
+		echo "rustgis-grass-setup: $program is not installed." >&2
+		exit 1
+	}
+done
+if ! command -v grass >/dev/null && [ -z "${RUSTGIS_GRASS:-}" ]; then
+	echo "rustgis-grass-setup: GRASS GIS was not found on the PATH." >&2
+	echo "Install it, or set RUSTGIS_GRASS to its launcher and run this again." >&2
+	exit 1
+fi
+
+mkdir -p "$dst"
+cp -a "$src/main.py" "$src/generate_manifest.py" "$src/grass_bridge" "$dst/"
+cd "$dst"
+python3 generate_manifest.py
+rustgis-cli plugins install "$dst"
+echo
+echo "The plugin is installed for $(id -un), from $dst."
+echo "Run it again after upgrading GRASS or this package."

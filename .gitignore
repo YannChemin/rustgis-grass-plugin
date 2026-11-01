@@ -5,3 +5,19 @@ __pycache__/
 # Written by generate_manifest.py from the GRASS installation on this machine.
 plugin.json
 modules.json
+
+# Debian build residue: the staging tree and debhelper's bookkeeping.
+debian/.debhelper/
+debian/rustgis-grass-plugin/
+debian/files
+debian/debhelper-build-stamp
+debian/*.debhelper
+debian/*.debhelper.log
+debian/*.substvars
+
+# dist/ stays local, except the one .deb the README installs: superseded
+# packages and build records do not belong in the repository. At each
+# release, point the exception at the new file and "git rm --cached" the old
+# one; a tracked file needs "git add -f" while dist/* is ignored.
+dist/*
+!dist/rustgis-grass-plugin_0.1.0_all.deb

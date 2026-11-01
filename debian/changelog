@@ -1,0 +1,16 @@
+rustgis-grass-plugin (0.1.0) unstable; urgency=medium
+
+  * First package. Five GRASS vector modules as RustGIS geoprocessing tools,
+    with every form read from the installed GRASS rather than kept by hand.
+  * Three raster modules as commands with a panel: slope, aspect and viewshed.
+    A plugin tool can take no raster and make no host request, so these export
+    the chosen layer, run the module and add the GeoTIFF back, inside the two
+    minutes RustGIS allows a command.
+  * Each run reports the projection it worked in, the computational region it
+    set and every distinct GRASS warning with a count. The region is never
+    left at its default: a fresh project's one-cell region silently drops
+    features.
+  * rustgis-grass-setup generates the manifest from the GRASS on this machine
+    and registers the plugin for the user who runs it.
+
+ -- Yann Chemin <dr.yann.chemin@gmail.com>  Sun, 01 Nov 2026 13:55:00 +0100
