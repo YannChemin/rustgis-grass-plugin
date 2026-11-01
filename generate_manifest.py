@@ -196,7 +196,7 @@ def build():
     manifest = {
         "id": "grass-vector",
         "name": "GRASS GIS Tools",
-        "version": "0.1.0",
+        "version": "0.2.0",
         "description": (
             "Runs GRASS GIS modules: vector modules as geoprocessing tools, raster "
             "modules from a panel of its own. GRASS must be installed separately; "

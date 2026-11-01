@@ -45,7 +45,7 @@ ever run with fixed defaults.
 From the package, on Debian or Ubuntu:
 
 ```sh
-sudo apt install ./dist/rustgis-grass-plugin_0.1.0_all.deb
+sudo apt install ./dist/rustgis-grass-plugin_0.2.0_all.deb
 rustgis-grass-setup          # once per user; again after upgrading GRASS
 ```
 
