@@ -116,6 +116,34 @@ command its permissions allow, which is enough to carry a raster in and out:
 The result stays in `~/.cache/rustgis-grass-plugin/`, because RustGIS reads the file when the
 layer is added and keeps the path; each message says where it is.
 
+### The GRASS database
+
+The panel's **Projects and mapsets** tree is the database GRASS itself uses, found the way GRASS
+finds it: `GISDBASE` when set, otherwise the `GISDBASE:` line of `~/.grass8/rc`, otherwise
+`~/grassdata`. Nothing here writes down a path.
+
+| Step | What happens |
+|---|---|
+| Open the panel | Projects and mapsets are read from the file system — a project is a folder with a PERMANENT mapset, a mapset one with a `WIND` file. 51 projects, 35,241 maps, in 0.03 s |
+| Choose a mapset | Its maps are listed: `cellhd` entries are rasters, `vector` folders are vectors. They load only then, because 35,000 maps do not fit a tree that takes 5,000 nodes |
+| Choose a map, then **Add Map** | It is exported and added to the project: a raster as a GeoTIFF, a vector as a GeoPackage, both of which carry the coordinate system |
+| **GRASS Database** | Puts the database folder in the browser's **Folders** (`project.addFolder`) |
+
+Exporting runs in a **throwaway mapset of that project** (`grass --tmp-mapset`), reading the map
+across mapsets as `name@mapset`. Nothing of the user's is written to, their own mapsets are never
+locked, and a GRASS session they have open elsewhere is undisturbed.
+
+Two things the host decides, not the plugin:
+
+- **A plugin cannot add an entry to the Add Data menu or to Data Sources.** Those are RustGIS's
+  own, and a plugin declares commands, tools, a tab and a panel — nothing else. `project.addFolder`
+  puts the database in the browser, but a mapset's own files are GRASS's formats, which RustGIS
+  has no reader for, so the folder is a signpost and **Add Map** is the way in. A data provider
+  reading mapsets directly would have to live in the RustGIS tree.
+- A GeoPackage written by GRASS from a project with a custom coordinate system comes back with
+  `srs_id 100000` and no EPSG code, and RustGIS says so when it reads it as longitude/latitude.
+  That notice is RustGIS's, and it is right to make it.
+
 ### The computational region
 
 A GRASS raster module takes its extent and resolution from `g.region`, not from its inputs, so

@@ -53,6 +53,29 @@ COMMANDS = [
         "params": "{} (the GRASS Raster panel chooses the layer, the viewer's height and the range)",
     },
     {
+        "id": "data-folder",
+        "label": "GRASS\nDatabase",
+        "help": "Put the GRASS database GRASS itself uses into the browser, "
+        "under Folders.",
+        "icon": "bookmark",
+        "params": "{}",
+    },
+    {
+        "id": "data-add",
+        "label": "Add\nMap",
+        "help": "Add the map chosen in the GRASS Data tree to this project, "
+        "exported to a format RustGIS reads.",
+        "icon": "stats",
+        "params": "{} (the panel's tree chooses the map)",
+    },
+    {
+        "id": "data-browse",
+        "label": "Browse\nMapset",
+        "help": "List the maps of the mapset chosen in the GRASS Data tree.",
+        "icon": "zoom_full",
+        "params": "{}",
+    },
+    {
         "id": "region-view",
         "label": "Region =\nMap View",
         "help": "Set the Analysis Environment's extent to what the map shows, "
@@ -80,11 +103,24 @@ COMMANDS = [
 #: The panel the raster commands take their parameters from. A command opens no
 #: dialog, so without a panel it could only ever run with fixed defaults.
 PANEL = {
-    "title": "GRASS Raster",
+    "title": "GRASS GIS",
     "icon": "stats",
-    "help": "Run GRASS raster modules on a raster layer of the map.",
+    "help": "Reach the GRASS database, and run GRASS raster modules on a "
+    "raster layer of the map.",
     "state": "raster-state",
     "items": [
+        {"kind": "text", "id": "gisdbase", "label": "GRASS database"},
+        {
+            "kind": "tree",
+            "id": "database",
+            "label": "Projects and mapsets",
+            "help": "The database GRASS itself uses. Choose a mapset to list "
+            "its maps, then a map, then Add Map.",
+            "search": True,
+            "command": "data-browse",
+        },
+        {"kind": "button", "command": "data-add"},
+        {"kind": "button", "command": "data-folder"},
         {
             "kind": "tree",
             "id": "raster",

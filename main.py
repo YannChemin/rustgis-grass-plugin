@@ -22,7 +22,7 @@ import os
 import pathlib
 import sys
 
-from grass_bridge import raster, session
+from grass_bridge import database, raster, session
 
 HERE = pathlib.Path(__file__).parent
 
@@ -123,6 +123,89 @@ def run_tool(req, modules):
     return {
         "layers": [{"name": f"{layer} {module}", "geojson": result}],
         "messages": messages[:200],
+    }
+
+
+#: Said whenever the database is put in the browser: its folders hold GRASS's
+#: own formats, which RustGIS has no reader for.
+NOT_READABLE = (
+    "A mapset's own files are in GRASS's formats, which RustGIS does not read; "
+    "use Add Map to bring one in."
+)
+
+
+def database_panel(chosen=None, notes=()):
+    """Return the panel items describing the GRASS database.
+
+    :param chosen: the tree node chosen, which decides the mapset listed
+    :param notes: lines to add under the tree
+    """
+    base = database.gisdbase()
+    if not base:
+        return {
+            "gisdbase": {"text": "No GRASS database found."},
+            "database": {"nodes": []},
+        }
+    nodes, more = database.tree(base, database.opened(chosen))
+    count = sum(node.get("count", 0) for node in nodes)
+    text = f"{base}\n{len(nodes)} projects, {count} maps"
+    for line in list(more) + list(notes):
+        text += f"\n{line}"
+    return {"gisdbase": {"text": text}, "database": {"nodes": nodes}}
+
+
+def browse_database(req):
+    """Answer the tree again, with the chosen mapset's maps in it."""
+    chosen = ((req.get("panel") or {}).get("values") or {}).get("database")
+    return {"panel": {"items": database_panel(chosen), "values": {"database": chosen}}}
+
+
+def add_folder(req):
+    """Put the GRASS database in RustGIS's browser, under Folders.
+
+    A plugin cannot add an entry to the Add Data menu; this is the nearest
+    thing it can do, and it is the same folder GRASS itself uses.
+    """
+    base = database.gisdbase()
+    if not base:
+        raise session.GrassError(
+            "no GRASS database was found: GISDBASE is not set, GRASS's settings "
+            "file names none, and there is no ~/grassdata"
+        )
+    call("project.addFolder", {"path": base})
+    call("host.notify", {"text": f"{base} is in the browser, under Folders."})
+    return {
+        "folder": base,
+        "panel": {"items": database_panel()},
+        "messages": [f"{base} added to the browser's Folders.", NOT_READABLE],
+    }
+
+
+def add_map(req):
+    """Export the map chosen in the tree and add it to the project."""
+    values = (req.get("panel") or {}).get("values") or {}
+    base = database.gisdbase()
+    if not base:
+        raise session.GrassError("no GRASS database was found")
+    kind, project, mapset, name = database.parse_node(values.get("database"))
+    # A raster goes out as a GeoTIFF and a vector as a GeoPackage, which both
+    # carry the coordinate system RustGIS then reads them in.
+    target = raster.output_path(f"{project}_{mapset}", name)
+    if kind == "vector":
+        target = target[: -len(".tif")] + ".gpkg"
+
+    with database.Export(progress=progress) as run:
+        messages = run.export(base, kind, project, mapset, name, target)
+
+    added = call("layer.addData", {"path": target, "name": f"{name}@{mapset}"})
+    messages.append(f"The export is kept at {target}.")
+    for text in messages:
+        log(text)
+    call("host.notify", {"text": f"{name}@{mapset} added from {project}."})
+    return {
+        "layer": added,
+        "messages": messages,
+        "panel": {"items": database_panel(values.get("database"))},
     }
 
 
@@ -260,6 +343,7 @@ def panel_state(req):
                 },
                 "region": {"text": describe_region(env)},
                 "status": {"text": status},
+                **database_panel(values.get("database")),
             },
         }
     }
@@ -270,6 +354,12 @@ def run_command(req):
     command = req.get("id")
     if command == "raster-state":
         return panel_state(req)
+    if command == "data-browse":
+        return browse_database(req)
+    if command == "data-folder":
+        return add_folder(req)
+    if command == "data-add":
+        return add_map(req)
     if command == "region-view":
         return set_region(req, "view")
     if command == "region-full":

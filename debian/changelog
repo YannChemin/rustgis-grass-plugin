@@ -8,6 +8,12 @@ rustgis-grass-plugin (0.2.0) unstable; urgency=medium
   * r.slope.aspect is given -a whenever the region was narrowed. Without it the
     module puts the region back on the elevation map's own grid, and the cell
     size asked for is ignored with nothing said.
+  * The panel reaches the GRASS database GRASS itself uses, found from GISDBASE
+    or its settings file: projects and mapsets are listed from the file system,
+    a mapset's maps when it is opened, and a chosen map is exported and added
+    to the project. The export runs in a throwaway mapset, so the user's own
+    mapsets are never locked. A button also puts the database in the browser's
+    Folders, which is as near the Add Data menu as a plugin can get.
   * A GRASS warning wrapped over several lines is kept whole. It was cut at the
     first line, which left sentences such as "East-west resolution does not
     equal north-south resolution. The" in the run's messages.

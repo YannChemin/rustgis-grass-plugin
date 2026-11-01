@@ -10,7 +10,7 @@ import time
 
 import pytest
 
-from grass_bridge import raster, session
+from grass_bridge import database, raster, session
 
 
 def layer(id, name, raster_layer=True, active=False):
@@ -208,3 +208,117 @@ def test_a_warning_wrapped_over_several_lines_is_kept_whole():
 
 def test_an_indented_line_after_other_output_is_not_taken_for_a_warning():
     assert session._warnings("Reading...\n   100%\n") == []
+
+
+def test_a_node_id_names_a_map_and_reads_back(tmp_path):
+    node = database.node_id("raster", "C2RD_drone", "PERMANENT", "lidarhd_mnt")
+    assert node == "raster/C2RD_drone/PERMANENT/lidarhd_mnt"
+    assert database.parse_node(node) == (
+        "raster",
+        "C2RD_drone",
+        "PERMANENT",
+        "lidarhd_mnt",
+    )
+
+
+def test_choosing_a_project_instead_of_a_map_says_so():
+    with pytest.raises(session.GrassError) as e:
+        database.parse_node("project/C2RD_drone")
+    assert "choose a map" in str(e.value)
+
+
+def test_a_mapset_or_a_map_both_say_which_mapset_to_open():
+    assert database.opened("mapset/P/PERMANENT") == ("P", "PERMANENT")
+    assert database.opened("raster/P/PERMANENT/dem") == ("P", "PERMANENT")
+    assert database.opened("project/P") is None
+    assert database.opened(None) is None
+
+
+def fake_database(root, layout):
+    """Write a GRASS database of empty maps and return its path."""
+    for project, mapsets_ in layout.items():
+        for mapset, names in mapsets_.items():
+            base = root / project / mapset
+            (base).mkdir(parents=True)
+            (base / "WIND").write_text("")
+            for kind, name in names:
+                if kind == "raster":
+                    (base / "cellhd").mkdir(exist_ok=True)
+                    (base / "cellhd" / name).write_text("")
+                else:
+                    (base / "vector" / name).mkdir(parents=True)
+    return str(root)
+
+
+def test_only_folders_holding_a_permanent_mapset_are_projects(tmp_path):
+    base = fake_database(tmp_path, {"site": {"PERMANENT": [("raster", "dem")]}})
+    (tmp_path / "notes.txt").write_text("a log beside the projects")
+    (tmp_path / "stray").mkdir()
+    assert database.projects(base) == ["site"]
+
+
+def test_permanent_comes_first_among_the_mapsets(tmp_path):
+    base = fake_database(
+        tmp_path,
+        {"site": {"PERMANENT": [("raster", "dem")], "alpha": [("vector", "roads")]}},
+    )
+    assert database.mapsets(base, "site") == ["PERMANENT", "alpha"]
+
+
+def test_rasters_and_vectors_are_both_found(tmp_path):
+    base = fake_database(
+        tmp_path, {"site": {"PERMANENT": [("raster", "dem"), ("vector", "roads")]}}
+    )
+    assert database.maps(base, "site", "PERMANENT") == [
+        ("raster", "dem"),
+        ("vector", "roads"),
+    ]
+
+
+def test_a_mapset_lists_its_maps_only_when_it_is_the_one_opened(tmp_path):
+    base = fake_database(
+        tmp_path, {"site": {"PERMANENT": [("raster", "dem"), ("raster", "slope")]}}
+    )
+    closed, _ = database.tree(base)
+    assert closed[0]["count"] == 2
+    assert "children" not in closed[0]["children"][0]
+    open_, _ = database.tree(base, ("site", "PERMANENT"))
+    assert [c["label"] for c in open_[0]["children"][0]["children"]] == [
+        "dem (raster)",
+        "slope (raster)",
+    ]
+
+
+def test_an_empty_mapset_is_left_out(tmp_path):
+    base = fake_database(tmp_path, {"site": {"PERMANENT": []}})
+    assert database.tree(base) == ([], [])
+
+
+def test_the_settings_file_says_where_the_database_is(tmp_path, monkeypatch):
+    (tmp_path / "grassdata").mkdir()
+    rc = tmp_path / "rc"
+    rc.write_text(f"GISDBASE: {tmp_path / 'grassdata'}\nMAPSET: PERMANENT\n")
+    monkeypatch.delenv("GISDBASE", raising=False)
+    monkeypatch.setattr(database, "RC_FILES", (str(rc),))
+    monkeypatch.setattr(database, "DEFAULT_DIR", str(tmp_path / "nothing"))
+    assert database.gisdbase() == str(tmp_path / "grassdata")
+
+
+def test_the_environment_wins_over_the_settings_file(tmp_path, monkeypatch):
+    (tmp_path / "session").mkdir()
+    monkeypatch.setenv("GISDBASE", str(tmp_path / "session"))
+    monkeypatch.setattr(database, "RC_FILES", ())
+    assert database.gisdbase() == str(tmp_path / "session")
+
+
+def test_no_database_anywhere_is_none(tmp_path, monkeypatch):
+    monkeypatch.delenv("GISDBASE", raising=False)
+    monkeypatch.setattr(database, "RC_FILES", ())
+    monkeypatch.setattr(database, "DEFAULT_DIR", str(tmp_path / "nothing"))
+    assert database.gisdbase() is None
+
+
+def test_a_size_is_readable():
+    assert database._size(512) == "512 bytes"
+    assert database._size(2048) == "2.0 kB"
+    assert database._size(5 * 1024 * 1024) == "5.0 MB"
