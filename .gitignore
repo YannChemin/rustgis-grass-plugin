@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Written by generate_manifest.py from the GRASS installation on this machine.
+plugin.json
+modules.json
