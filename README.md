@@ -5,6 +5,8 @@ vector modules as geoprocessing tools, raster modules as commands with a panel. 
 prototype for
 [opengeos/RustGIS#1249](https://github.com/opengeos/RustGIS/issues/1249), which proposes the same
 bridge as a crate in the RustGIS tree.
+[GRASS_INTERFACE.md](GRASS_INTERFACE.md) is the survey of RustGIS's extension points this was
+designed from, written before the prototype and partly superseded by it.
 
 ![The GRASS vector tools as a group on the RustGIS Plugins ribbon tab](plugin_grassgis.png)
 
