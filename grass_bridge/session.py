@@ -17,12 +17,18 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 
 #: Where to look for the GRASS launcher, before the PATH.
 ENV = "RUSTGIS_GRASS"
 
 #: A module run gets this long before it is given up on.
 TIMEOUT = 1800
+
+#: RustGIS stops a plugin command after this long (docs/plugins.md > The
+#: protocol). A command's run keeps inside it and says so, rather than being
+#: killed with a half-written file behind it.
+COMMAND_LIMIT = 120
 
 
 class GrassError(Exception):
@@ -212,13 +218,16 @@ def _why(out):
 class Run:
     """One module run: its own GISDBASE, removed when the run ends."""
 
-    def __init__(self, grass=None, progress=None):
+    def __init__(self, grass=None, progress=None, deadline=None):
         self.grass = grass or find_grass()
         if not self.grass:
             raise GrassError(
                 "GRASS GIS is not installed, or RUSTGIS_GRASS does not name it"
             )
         self.progress = progress or (lambda text: None)
+        # When set, the moment (time.monotonic) by which every step must be
+        # over: a command's whole run has to fit in what RustGIS allows it.
+        self.deadline = deadline
         self.dir = tempfile.mkdtemp(prefix="rustgis-grass-")
         self.messages = []
         # One entry per distinct warning, with how often GRASS said it: a
@@ -235,26 +244,47 @@ class Run:
     def __exit__(self, *_):
         self.close()
 
+    def left(self):
+        """Return the seconds a step may take, from the run's deadline.
+
+        :raises GrassError: when the time allowed is already spent
+        """
+        if self.deadline is None:
+            return TIMEOUT
+        left = self.deadline - time.monotonic()
+        if left <= 1.0:
+            raise GrassError(
+                f"the work did not fit in the {COMMAND_LIMIT} seconds RustGIS gives a "
+                "plugin command; run it on a smaller raster, or zoom in and export the "
+                "part you need"
+            )
+        return left
+
     def _project(self, name, crs):
-        """Create a project for ``crs`` (an EPSG code or "XY") and return it."""
+        """Create a project for ``crs`` and return its path.
+
+        :param crs: an EPSG code, ``"XY"``, or a georeferenced file whose own
+            coordinate system the project takes
+        """
         path = os.path.join(self.dir, name)
         argv = [self.grass, "-c", crs, path, "-e"]
         out = subprocess.run(
-            argv, capture_output=True, text=True, check=False, timeout=300
+            argv, capture_output=True, text=True, check=False, timeout=self.left()
         )
         if out.returncode != 0 or not os.path.isdir(os.path.join(path, "PERMANENT")):
-            raise GrassError(f"cannot create a {crs} project: {_why(out)}")
+            raise GrassError(f"cannot create a project from {crs}: {_why(out)}")
         return path
 
     def exec(self, project, module, *args):
         """Run one module in ``project`` and return its standard output."""
         argv = [self.grass, os.path.join(project, "PERMANENT"), "--exec", module, *args]
+        allowed = self.left()
         try:
             out = subprocess.run(
-                argv, capture_output=True, text=True, check=False, timeout=TIMEOUT
+                argv, capture_output=True, text=True, check=False, timeout=allowed
             )
         except subprocess.TimeoutExpired as e:
-            raise GrassError(f"{module}: gave up after {TIMEOUT // 60} minutes") from e
+            raise GrassError(f"{module}: gave up after {allowed:.0f} seconds") from e
         except OSError as e:
             raise GrassError(f"{module}: {e}") from e
         if out.returncode != 0:

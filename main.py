@@ -1,8 +1,14 @@
-"""A RustGIS process plugin that runs GRASS GIS vector modules.
+"""A RustGIS process plugin that runs GRASS GIS modules.
 
 RustGIS starts this program once per call and speaks one JSON object per line
 over standard input and output (see RustGIS docs/plugins.md). GRASS itself is
-never linked: each tool run spawns the user's own installation.
+never linked: each run spawns the user's own installation.
+
+Vector modules are geoprocessing tools: RustGIS hands them the layer's
+features as GeoJSON and takes the result back the same way. Raster modules are
+commands instead, because a tool gets no raster and makes no host requests;
+a command asks RustGIS to export the layer and to add the result back (see
+grass_bridge/raster.py).
 
 Progress goes to RustGIS as {"progress": ...} lines, and GRASS modules report
 their own percentages to MetaMonitor through its GRASS hook
@@ -12,10 +18,11 @@ SPDX-License-Identifier: Unlicense
 """
 
 import json
+import os
 import pathlib
 import sys
 
-from grass_bridge import session
+from grass_bridge import raster, session
 
 HERE = pathlib.Path(__file__).parent
 
@@ -28,6 +35,33 @@ def emit(obj):
 def progress(text):
     """Tell RustGIS what the run is doing now."""
     emit({"progress": text})
+
+
+def log(text):
+    """Add a line to the log, and to a tool's run messages."""
+    emit({"log": text})
+
+
+def call(op, params=None):
+    """Make one host request and return its answer.
+
+    :param op: a host operation (``host.layers``) or any command id RustGIS
+        lets this plugin run within its permissions
+    :return: the ``ok`` value
+    :raises session.GrassError: when RustGIS refuses the request, so the
+        reason reaches the user instead of a traceback
+    """
+    emit({"call": {"op": op, "params": params or {}}})
+    line = sys.stdin.readline()
+    if not line.strip():
+        raise session.GrassError(f"RustGIS gave no answer to '{op}'")
+    try:
+        reply = json.loads(line)
+    except ValueError as e:
+        raise session.GrassError(f"unreadable answer to '{op}': {e}") from e
+    if "error" in reply:
+        raise session.GrassError(f"{op}: {reply['error']}")
+    return reply.get("ok")
 
 
 def load_modules():
@@ -92,6 +126,121 @@ def run_tool(req, modules):
     }
 
 
+def run_raster_command(req):
+    """Run one GRASS raster module over a raster layer of the map.
+
+    A tool could not do this: it gets no raster and makes no host requests.
+    This command asks RustGIS to export the layer, works on the file, and asks
+    it to add the result back. See ``grass_bridge/raster.py``.
+
+    :param req: the command request
+    :return: its ``ok`` value, the panel's new state included
+    """
+    command = req["id"]
+    operation = raster.OPERATIONS[command]
+    panel = req.get("panel") or {}
+    values = panel.get("values") or {}
+
+    layers = call("host.layers") or []
+    nodes = raster.raster_nodes(layers)
+    layer = raster.choose_raster(layers, values.get("raster"))
+    name = str(layer.get("name"))
+
+    exported = os.path.join(raster.output_dir(), f".export-{os.getpid()}.tif")
+    target = raster.output_path(name, operation["suffix"])
+    centre = None
+    if operation["module"] == "r.viewshed":
+        view = call("host.view") or {}
+        centre = tuple((view.get("center") or [None, None])[:2])
+        if centre[0] is None:
+            raise session.GrassError("RustGIS did not say where the map is centred")
+
+    progress(f"Exporting {name}...")
+    call("share.exportRaster", {"layer": name, "path": exported})
+    try:
+        with raster.RasterRun(progress=progress) as run:
+            messages = run.raster_tool(command, exported, target, values, centre)
+    finally:
+        try:
+            os.remove(exported)
+        except OSError:
+            pass
+
+    added = call(
+        "layer.addData", {"path": target, "name": f"{name} {operation['suffix']}"}
+    )
+    messages.append(f"The result is kept at {target}.")
+    for text in messages:
+        log(text)
+    call("host.notify", {"text": f"{operation['label']}: {messages[0]}"})
+    return {
+        "layer": added,
+        "messages": messages,
+        "panel": {
+            "values": {"raster": str(layer.get("id"))},
+            "items": {
+                "raster": {"nodes": nodes},
+                "source": {"text": name},
+                "status": {"text": "\n".join(messages)},
+            },
+        },
+    }
+
+
+def panel_state(req):
+    """Answer the panel's state when it is opened.
+
+    It reads the map only, so it is no undo step.
+    """
+    layers = call("host.layers") or []
+    nodes = raster.raster_nodes(layers)
+    values = (req.get("panel") or {}).get("values") or {}
+    chosen = values.get("raster")
+    if chosen is not None and not any(n["id"] == str(chosen) for n in nodes):
+        chosen = None
+    if chosen is None:
+        active = [
+            layer for layer in layers if layer.get("raster") and layer.get("active")
+        ]
+        if active:
+            chosen = str(active[0].get("id"))
+        elif len(nodes) == 1:
+            chosen = nodes[0]["id"]
+    installed = session.version()
+    status = (
+        f"GRASS GIS {installed}."
+        if installed
+        else "GRASS GIS was not found. Install it, or set RUSTGIS_GRASS to its launcher."
+    )
+    if not nodes:
+        status += " The map has no raster layer."
+    return {
+        "panel": {
+            "values": {"raster": chosen} if chosen else {},
+            "items": {
+                "raster": {"nodes": nodes},
+                "source": {
+                    "text": next(
+                        (n["label"] for n in nodes if n["id"] == chosen),
+                        "No raster chosen",
+                    )
+                },
+                "status": {"text": status},
+            },
+        }
+    }
+
+
+def run_command(req):
+    """Answer one command request."""
+    command = req.get("id")
+    if command == "raster-state":
+        return panel_state(req)
+    if command in raster.OPERATIONS:
+        return run_raster_command(req)
+    raise ValueError(f"unknown command '{command}'")
+
+
 def main():
     """Read one request, answer it, and exit."""
     line = sys.stdin.readline()
@@ -106,6 +255,8 @@ def main():
     try:
         if req.get("kind") == "tool":
             emit({"ok": run_tool(req, load_modules())})
+        elif req.get("kind") == "command":
+            emit({"ok": run_command(req)})
         else:
             emit({"error": f"unknown request '{req.get('id')}'"})
     except session.GrassError as e:

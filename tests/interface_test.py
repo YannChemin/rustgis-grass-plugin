@@ -206,6 +206,10 @@ def test_the_plugin_reports_an_unmapped_tool():
     assert "error" in reply and "no-such-tool" in reply["error"]
 
 
+@pytest.mark.skipif(
+    not (pathlib.Path(__file__).parent.parent / "plugin.json").exists(),
+    reason="plugin.json is generated from the GRASS installation; run generate_manifest.py",
+)
 def test_the_plugin_refuses_a_request_with_no_layer():
     here = pathlib.Path(__file__).parent.parent
     req = {
