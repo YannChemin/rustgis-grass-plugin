@@ -1,3 +1,22 @@
+rustgis-grass-plugin (0.3.0) unstable; urgency=medium
+
+  * A ribbon tab of its own, with groups for the database, the region, raster
+    work and the vector tools, the last as menus by GRASS keyword.
+  * Every installed module is offered. The forms of 64 vector modules are
+    generated as geoprocessing tools, which is every tool a manifest holds,
+    and all 1,172 modules the installation could describe are in a searchable
+    tree in the panel. Run Module runs the chosen one on the chosen raster
+    layer with GRASS's own defaults; the 357 that read a raster and write one
+    are marked in the tree.
+  * The module list comes from the installation itself, addons included, and
+    the generator says how many modules it read, how many became tools and
+    which ones it had to leave out.
+  * Parameters RustGIS would refuse are left out and reported: a name with a
+    digit in it (v.gsflow.segments's "width1") and a name the module declares
+    twice (the same module does, four times over).
+
+ -- Yann Chemin <dr.yann.chemin@gmail.com>  Sun, 01 Nov 2026 15:05:00 +0100
+
 rustgis-grass-plugin (0.2.0) unstable; urgency=medium
 
   * The computational region comes from RustGIS's Analysis Environment: its

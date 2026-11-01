@@ -8,7 +8,13 @@ is kept by hand and no GRASS help text is copied anywhere.
 SPDX-License-Identifier: Unlicense
 """
 
+import re
 import xml.etree.ElementTree as ET
+
+#: What RustGIS takes as a tool parameter's name: a lower-case letter, then
+#: letters and underscores. GRASS has parameters it would refuse, such as
+#: v.gsflow.segments's "width1", so those are left out and reported.
+VALID_NAME = re.compile(r"^[a-z][a-zA-Z_]*$")
 
 #: Flags every GRASS module carries, which RustGIS has its own answer for.
 PLUMBING_FLAGS = frozenset({"overwrite", "verbose", "quiet", "help", "ui"})
@@ -62,6 +68,80 @@ def _choices(param):
     return out[:64]
 
 
+#: What a module's prefix says it works on, for the module tree.
+FAMILIES = {
+    "d": "Display",
+    "db": "Database",
+    "g": "General",
+    "i": "Imagery",
+    "m": "Miscellaneous",
+    "p": "Planetary",
+    "ps": "PostScript",
+    "r": "Raster",
+    "r3": "3D Raster",
+    "t": "Temporal",
+    "test": "Tests",
+    "v": "Vector",
+}
+
+
+def family_of(module):
+    """Return the name of the family a module's prefix puts it in."""
+    prefix = module.split(".", 1)[0]
+    return FAMILIES.get(prefix, "Other")
+
+
+def ports(task):
+    """Return what a module reads and writes, by element and age.
+
+    :param task: the parsed ``<task>`` element
+    :return: ``{"raster_in", "raster_out", "vector_in", "vector_out"}``, each
+        a list of parameter names
+    """
+    out = {"raster_in": [], "raster_out": [], "vector_in": [], "vector_out": []}
+    for param in task.findall("parameter"):
+        prompt = param.find("gisprompt")
+        if prompt is None:
+            continue
+        element = prompt.get("prompt") or prompt.get("element") or ""
+        if element in ("raster", "cell"):
+            kind = "raster"
+        elif element == "vector":
+            kind = "vector"
+        else:
+            continue
+        side = "out" if prompt.get("age") == "new" else "in"
+        out[f"{kind}_{side}"].append(param.get("name") or "")
+    return out
+
+
+def describe(xml_text):
+    """Describe one module for the catalogue the panel's tree is built from.
+
+    This is what tells a raster module from a vector one without running it
+    again, and carries the one line GRASS gives for each.
+
+    :param xml_text: the module's ``--interface-description`` output
+    :return: ``{"module", "summary", "keywords", "family", ports...}``
+    :raises ValueError: when the document is not a task description
+    """
+    try:
+        task = ET.fromstring(xml_text)
+    except ET.ParseError as e:
+        raise ValueError(f"not a module description: {e}") from e
+    name = task.get("name") or ""
+    if task.tag != "task" or not name:
+        raise ValueError("not a module description: no <task name=...>")
+    out = {
+        "module": name,
+        "summary": (_text(task.find("label")) or _text(task.find("description")))[:300],
+        "keywords": _text(task.find("keywords")),
+        "family": family_of(name),
+    }
+    out.update(ports(task))
+    return out
+
+
 def parse(xml_text):
     """Describe one module from its ``--interface-description`` output.
 
@@ -82,12 +162,19 @@ def parse(xml_text):
     label = _text(task.find("label")) or _text(task.find("description"))
     params, skipped = [], []
 
+    seen = set()
     for param in task.findall("parameter"):
         name = param.get("name") or ""
         if not name or name in PLUMBING_PARAMS:
             continue
+        if name in seen:
+            # Some modules declare a parameter twice (v.gsflow.segments does);
+            # RustGIS refuses a repeated name, so the second is left out.
+            skipped.append(f"{name} (declared twice)")
+            continue
+        seen.add(name)
         kind = _kind_of(param)
-        if kind is None:
+        if kind is None or not VALID_NAME.match(name):
             skipped.append(name)
             continue
         spec = {
@@ -115,9 +202,13 @@ def parse(xml_text):
             spec["label"] += " (one layer)"
         params.append(spec)
 
+    taken = {spec["name"] for spec in params}
     for flag in task.findall("flag"):
         name = flag.get("name") or ""
-        if not name or name in PLUMBING_FLAGS:
+        if not name or name in PLUMBING_FLAGS or f"flag_{name}" in taken:
+            continue
+        if not VALID_NAME.match(f"flag_{name}"):
+            skipped.append(f"-{name}")
             continue
         params.append(
             {

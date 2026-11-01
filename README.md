@@ -12,10 +12,9 @@ designed from, written before the prototype and partly superseded by it.
 forest_ndvi chosen, and that map drawn on the map canvas; the Plugins ribbon tab above carries the
 GRASS GIS Tools group](plugin_grassgis_access_datasets.png)
 
-Everything the plugin offers sits in one **GRASS GIS Tools** group on the **Plugins** tab: the
-panel, the three raster commands, the two region buttons, the three database commands and the five
-vector tools. Above, `forest_ndvi` has been taken out of the `IGN` project's `PERMANENT` mapset
-and drawn with a ramp over its own −0.33 to 0.84.
+Above, `forest_ndvi` has been taken out of the `IGN` project's `PERMANENT` mapset and drawn with
+a ramp over its own −0.33 to 0.84. (The screenshot predates the plugin's own **GRASS** tab, which
+now holds what is shown there in the Plugins group.)
 
 GRASS is not bundled, linked or copied here. Each run spawns the `grass` launcher already
 installed on the machine, and every tool's form is read from that installation at build time with
@@ -25,34 +24,50 @@ Apache-2.0 GIS this way.
 
 ## What it offers
 
-Five vector modules as **tools**, with their forms generated from GRASS's own metadata:
+Everything the installation has. On this machine that is **1,178 modules**, addons included, of
+which **1,172** could describe themselves:
 
-| Tool | Module |
-|---|---|
-| Voronoi Polygons | `v.voronoi` |
-| Delaunay Triangulation | `v.delaunay` |
-| Point Clusters | `v.cluster` |
-| Generalize | `v.generalize` |
-| Points Along Lines | `v.to.points` |
+| Family | Modules | Family | Modules |
+|---|---|---|---|
+| Raster (`r.*`) | 454 | General (`g.*`) | 55 |
+| Vector (`v.*`) | 223 | Display (`d.*`) | 49 |
+| Imagery (`i.*`) | 174 | 3D Raster (`r3.*`) | 35 |
+| Temporal (`t.*`) | 74 | Database (`db.*`) | 22 |
+| Planetary (`p.*`) | 67 | Miscellaneous (`m.*`) | 14 |
 
-Three raster modules as **commands**, driven from the **GRASS Raster** panel:
+They are reached three ways, because the ABI gives three and each has a ceiling:
 
-| Command | Module | Result |
+| Route | Covers | Ceiling |
 |---|---|---|
-| Slope | `r.slope.aspect` | steepness, in degrees or percent |
-| Aspect | `r.slope.aspect` | the direction each cell faces, clockwise from north |
-| Viewshed | `r.viewshed` | what is visible from the centre of the map |
+| **Tools**, with a generated form in the Tools pane | 64 vector modules | a manifest holds **64 tools**, and a tool takes no raster, so only vector modules qualify: 128 do, half of them fit |
+| **Commands** on the ribbon | Slope, Aspect, Viewshed, the region and the database | a manifest holds **256 commands**, and a command opens no dialog, so each needs the panel to be told anything |
+| **Run Module**, from the panel's tree | **all 1,172**, of which the **357** that read a raster and write one can be run | a command has no form, so only the input and the output are named; everything else is GRASS's default |
 
-The panel chooses the raster layer, the computational region, the slope's unit, the viewer's
-height and the viewshed's range. A command opens no dialog, so without a panel these could only
-ever run with fixed defaults.
+The tree is searchable and marks with **▸** the modules Run Module can drive. The 64 modules that
+could have been tools but did not fit are listed in `modules.json` under `toolsLeftOut`, as are
+the five that could not be read at all.
+
+So "every GRASS module" is true for *reaching* them and false for *forms*: 64 of 1,172 get one.
+That gap is the ABI's, not GRASS's, and it is what a crate in the RustGIS tree would close.
+
+### Its own tab
+
+The plugin has a **GRASS** tab rather than a group on **Plugins**, which had grown to 15 buttons
+against a documented limit of 16:
+
+| Group | Holds |
+|---|---|
+| Database | the panel, GRASS Database, Add Map, Browse Mapset |
+| Region | Region = Map View, Region = Whole Layer, Refresh Rasters |
+| Raster | Slope, Aspect, Viewshed, Run Module |
+| Vector | the 64 tools, in menus by GRASS keyword (Proximity, Geometry, Network, LIDAR…) |
 
 ## Install
 
 From the package, on Debian or Ubuntu:
 
 ```sh
-sudo apt install ./dist/rustgis-grass-plugin_0.2.0_all.deb
+sudo apt install ./dist/rustgis-grass-plugin_0.3.0_all.deb
 rustgis-grass-setup          # once per user; again after upgrading GRASS
 ```
 
@@ -195,8 +210,11 @@ Measured here, `r.slope.aspect` end to end, project creation, export and import 
 
 So the cap is generous for a per-cell module and useless for `r.watershed` on a national DEM.
 That ceiling, not the ABI, is now the reason raster work belongs in a crate rather than a plugin.
-`generate_manifest.py` still prints what it had to leave out of each **tool**, and the mapper
-refuses every raster parameter there rather than offering one that cannot work.
+`generate_manifest.py` prints what it had to leave out of each **tool**, and the mapper refuses
+what RustGIS would not take rather than offering something that cannot work: a raster parameter,
+a name with a digit in it (`v.gsflow.segments` has `width1`), and a name the module declares twice
+(the same module declares four of them twice over). Reading all 1,178 forms takes about three and
+a half minutes, 24 at a time.
 
 ## Watch out
 

@@ -160,6 +160,92 @@ def module_args(command, values, point=None):
     return argv, notes
 
 
+def catalogue_tree(catalogue, chosen=None):
+    """Return the panel tree of every module installed, by family.
+
+    A tree holds 5,000 nodes and there are about 1,200 modules, so all of them
+    fit; what a manifest cannot hold is a tool or a command for each.
+
+    :param catalogue: the entries ``generate_manifest.py`` wrote
+    :param chosen: the module whose family is opened
+    :return: ``(nodes, [note, ...])``
+    """
+    families = {}
+    for entry in catalogue:
+        families.setdefault(entry["family"], []).append(entry)
+    nodes = []
+    for family in sorted(families):
+        entries = sorted(families[family], key=lambda e: e["module"])
+        nodes.append(
+            {
+                "id": f"family/{family}",
+                "label": family,
+                "count": len(entries),
+                "children": [
+                    {
+                        "id": entry["module"],
+                        # A leading mark tells the modules Run Module can
+                        # drive from the ones that would need a form.
+                        "label": (
+                            f"{'▸ ' if entry.get('raster') else '  '}"
+                            f"{entry['module']}"
+                            + (
+                                f" - {entry['summary'][:90]}"
+                                if entry["summary"]
+                                else ""
+                            )
+                        ),
+                    }
+                    for entry in entries
+                ],
+            }
+        )
+    notes = []
+    if chosen:
+        entry = next((e for e in catalogue if e["module"] == chosen), None)
+        if entry and not entry["raster"]:
+            notes.append(
+                f"{chosen} does not take a raster and write one, so Run Module "
+                "cannot drive it; a module needing a form has to be a tool."
+            )
+    return nodes, notes
+
+
+def entry_for(catalogue, module):
+    """Return one module's catalogue entry.
+
+    :raises session.GrassError: when the tree holds no such module
+    """
+    for entry in catalogue:
+        if entry["module"] == module:
+            return entry
+    raise session.GrassError(
+        "choose a module in the GRASS Modules tree, not a family"
+        if str(module or "").startswith("family/")
+        else f"'{module}' is not a module of this GRASS installation"
+    )
+
+
+def free_module_args(entry):
+    """Return the arguments for running one module on ``src`` into ``out``.
+
+    Only a module that reads a raster and writes one can be driven this way:
+    the bridge names its input and its output and leaves every other parameter
+    at GRASS's own default, because a command has no form to ask with.
+
+    :raises session.GrassError: when the module takes no raster, or writes none
+    """
+    if not entry.get("raster"):
+        raise session.GrassError(
+            f"{entry['module']} does not read a raster and write one, so it "
+            "cannot be run from the tree; the modules that can are marked in it"
+        )
+    return [
+        f"{entry['raster_in'][0]}=src",
+        f"{entry['raster_out'][0]}=out",
+    ]
+
+
 def output_dir():
     """Return the folder the results are written to, created if need be.
 
@@ -278,6 +364,74 @@ class RasterRun(session.Run):
             )
         messages += region_notes
         messages += notes
+        for text, count in self.warnings.items():
+            messages.append(
+                f"GRASS: {text}" + (f" ({count} times)" if count > 1 else "")
+            )
+        return messages
+
+    def free_module(self, module, argv, source, target, env=None):
+        """Run any raster module over a GeoTIFF, with its own defaults.
+
+        The same round trip as :meth:`raster_tool`, for a module the bridge
+        knows nothing about beyond which parameter takes its raster and which
+        names its output.
+
+        :param module: the GRASS module
+        :param argv: its input and output arguments
+        :return: ``[message, ...]``
+        :raises session.GrassError: when any step fails
+        """
+        self.progress("Preparing a working project...")
+        project = self._project("raster", source)
+        proj = " ".join(
+            self.exec(project, "g.proj", "-p", "-f", "format=proj4").split()
+        )
+        self.progress("Importing the raster...")
+        self.exec(
+            project,
+            "r.in.gdal",
+            f"input={source}",
+            "output=src",
+            "--overwrite",
+            "--quiet",
+        )
+        self.exec(project, "g.region", "raster=src")
+        region = self._region(project)
+        region, region_notes, _ = self._apply_environment(
+            project, region, proj, env, None
+        )
+
+        self.progress(f"Running {module}...")
+        self.exec(project, module, *argv, "--overwrite", "--quiet")
+        self.progress("Writing the result...")
+        self.exec(
+            project,
+            "r.out.gdal",
+            "input=out",
+            f"output={target}",
+            "format=GTiff",
+            "-c",
+            "--overwrite",
+            "--quiet",
+        )
+        if not os.path.exists(target):
+            raise session.GrassError(f"{module} wrote no file at {target}")
+
+        where = proj or "the raster's own projection"
+        messages = [f"{module} ran in {where}, with GRASS's own defaults."]
+        if region:
+            messages.append(
+                "Computational region used: "
+                f"{region.get('cols', '?')} by {region.get('rows', '?')} cells of "
+                f"{region.get('ewres', '?')} by {region.get('nsres', '?')}."
+            )
+        messages += region_notes
+        messages.append(
+            f"Only {argv[0].split('=')[0]} and {argv[1].split('=')[0]} were set; "
+            "every other parameter is GRASS's default, because a command has no "
+            "form to ask with."
+        )
         for text, count in self.warnings.items():
             messages.append(
                 f"GRASS: {text}" + (f" ({count} times)" if count > 1 else "")

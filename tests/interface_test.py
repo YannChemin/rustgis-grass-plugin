@@ -105,12 +105,16 @@ def test_keeps_choices_and_defaults(form):
     assert distance["default"] == 25.5
 
 
+ALPHABET = "abcdefghijklmnopqrstuvwxyz"
+
+
 def test_required_parameters_survive_truncation():
     many = TASK.replace(
         "</task>",
         "".join(
-            f'<parameter name="p{i}" type="float" required="no"><description>x</description>'
-            f"</parameter>"
+            # Names of letters only: RustGIS refuses a digit in one.
+            f'<parameter name="p{ALPHABET[i // 26]}{ALPHABET[i % 26]}" type="float" '
+            f'required="no"><description>x</description></parameter>'
             for i in range(40)
         )
         + "</task>",
@@ -262,3 +266,32 @@ def test_an_empty_layer_fails_loudly():
         pytest.raises(session.GrassError, match="no features"),
     ):
         run.vector_tool("v.delaunay", {"type": "FeatureCollection", "features": []}, {})
+
+
+def test_a_parameter_rustgis_would_refuse_is_left_out_and_reported():
+    xml = """<?xml version="1.0"?><task name="v.gsflow.segments">
+      <parameter name="width1" type="float"><description>A width</description></parameter>
+      <parameter name="width" type="float"><description>Another</description></parameter>
+    </task>"""
+    form = interface.parse(xml)
+    assert [p["name"] for p in form["params"]] == ["width"]
+    assert "width1" in form["skipped"]
+
+
+def test_a_flag_named_like_a_parameter_is_not_declared_twice():
+    xml = """<?xml version="1.0"?><task name="v.test">
+      <parameter name="flag_t" type="string"><description>A parameter</description></parameter>
+      <flag name="t"><description>A flag</description></flag>
+    </task>"""
+    form = interface.parse(xml)
+    assert [p["name"] for p in form["params"]] == ["flag_t"]
+
+
+def test_a_parameter_declared_twice_is_kept_once_and_reported():
+    xml = """<?xml version="1.0"?><task name="v.gsflow.segments">
+      <parameter name="width" type="float"><description>A width</description></parameter>
+      <parameter name="width" type="float"><description>The same again</description></parameter>
+    </task>"""
+    form = interface.parse(xml)
+    assert [p["name"] for p in form["params"]] == ["width"]
+    assert "width (declared twice)" in form["skipped"]

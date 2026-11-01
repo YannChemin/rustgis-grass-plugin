@@ -64,12 +64,17 @@ def call(op, params=None):
     return reply.get("ok")
 
 
+def load_catalogue():
+    """Return what generate_manifest.py read from the GRASS installation."""
+    try:
+        return json.loads((HERE / "modules.json").read_text())
+    except (OSError, ValueError):
+        return {}
+
+
 def load_modules():
     """Return the tool id to GRASS module map the generator wrote."""
-    try:
-        return json.loads((HERE / "modules.json").read_text())["modules"]
-    except (OSError, ValueError, KeyError):
-        return {}
+    return load_catalogue().get("modules") or {}
 
 
 def split_params(declared, given):
@@ -209,6 +214,55 @@ def add_map(req):
     }
 
 
+def run_module(req):
+    """Run the module chosen in the tree on the chosen raster layer.
+
+    Every installed module is in the tree, but only one that reads a raster
+    and writes one can be run this way: a command has no form, so the bridge
+    can name the input and the output and nothing else. A module that needs
+    more than that has to be a tool, and a manifest holds 64 of those.
+    """
+    values = (req.get("panel") or {}).get("values") or {}
+    catalogue = load_catalogue().get("catalogue") or []
+    entry = raster.entry_for(catalogue, values.get("modules"))
+    argv = raster.free_module_args(entry)
+
+    layers = call("host.layers") or []
+    layer = raster.choose_raster(layers, values.get("raster"))
+    name = str(layer.get("name"))
+    env = call("gp.env", {}) or {}
+
+    exported = os.path.join(raster.output_dir(), f".export-{os.getpid()}.tif")
+    target = raster.output_path(name, entry["module"].replace(".", "-"))
+    progress(f"Exporting {name}...")
+    call("share.exportRaster", {"layer": name, "path": exported})
+    try:
+        with raster.RasterRun(progress=progress) as run:
+            messages = run.free_module(entry["module"], argv, exported, target, env)
+    finally:
+        try:
+            os.remove(exported)
+        except OSError:
+            pass
+
+    added = call("layer.addData", {"path": target, "name": f"{name} {entry['module']}"})
+    messages.append(f"The result is kept at {target}.")
+    for text in messages:
+        log(text)
+    call("host.notify", {"text": f"{entry['module']}: {messages[0]}"})
+    nodes, notes = raster.catalogue_tree(catalogue, entry["module"])
+    return {
+        "layer": added,
+        "messages": messages + notes,
+        "panel": {
+            "items": {
+                "modules": {"nodes": nodes},
+                "status": {"text": "\n".join(messages)},
+            }
+        },
+    }
+
+
 def describe_region(env):
     """Return one line saying what region a run would use."""
     env = env or {}
@@ -343,6 +397,11 @@ def panel_state(req):
                 },
                 "region": {"text": describe_region(env)},
                 "status": {"text": status},
+                "modules": {
+                    "nodes": raster.catalogue_tree(
+                        load_catalogue().get("catalogue") or []
+                    )[0]
+                },
                 **database_panel(values.get("database")),
             },
         }
@@ -354,6 +413,8 @@ def run_command(req):
     command = req.get("id")
     if command == "raster-state":
         return panel_state(req)
+    if command == "run-module":
+        return run_module(req)
     if command == "data-browse":
         return browse_database(req)
     if command == "data-folder":
