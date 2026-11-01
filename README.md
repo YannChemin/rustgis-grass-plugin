@@ -8,7 +8,14 @@ bridge as a crate in the RustGIS tree.
 [GRASS_INTERFACE.md](GRASS_INTERFACE.md) is the survey of RustGIS's extension points this was
 designed from, written before the prototype and partly superseded by it.
 
-![The GRASS vector tools as a group on the RustGIS Plugins ribbon tab](plugin_grassgis.png)
+![The GRASS GIS panel on the right of RustGIS, listing the IGN project's PERMANENT mapset with
+forest_ndvi chosen, and that map drawn on the map canvas; the Plugins ribbon tab above carries the
+GRASS GIS Tools group](plugin_grassgis_access_datasets.png)
+
+Everything the plugin offers sits in one **GRASS GIS Tools** group on the **Plugins** tab: the
+panel, the three raster commands, the two region buttons, the three database commands and the five
+vector tools. Above, `forest_ndvi` has been taken out of the `IGN` project's `PERMANENT` mapset
+and drawn with a ramp over its own −0.33 to 0.84.
 
 GRASS is not bundled, linked or copied here. Each run spawns the `grass` launcher already
 installed on the machine, and every tool's form is read from that installation at build time with
@@ -128,6 +135,8 @@ finds it: `GISDBASE` when set, otherwise the `GISDBASE:` line of `~/.grass8/rc`,
 | Choose a mapset | Its maps are listed: `cellhd` entries are rasters, `vector` folders are vectors. They load only then, because 35,000 maps do not fit a tree that takes 5,000 nodes |
 | Choose a map, then **Add Map** | It is exported and added to the project: a raster as a GeoTIFF, a vector as a GeoPackage, both of which carry the coordinate system |
 | **GRASS Database** | Puts the database folder in the browser's **Folders** (`project.addFolder`) |
+
+The status bar reports each one — *GRASS GIS Tools: forest_ndvi@PERMANENT added from IGN.*
 
 Exporting runs in a **throwaway mapset of that project** (`grass --tmp-mapset`), reading the map
 across mapsets as `name@mapset`. Nothing of the user's is written to, their own mapsets are never
