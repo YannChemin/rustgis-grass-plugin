@@ -22,9 +22,13 @@ check:
 	python3 -m pytest -q -p no:cacheprovider tests
 
 install:
-	install -d $(SHARE) $(SHARE)/grass_bridge $(BIN)
+	install -d $(SHARE) $(SHARE)/grass_bridge $(SHARE)/skills/grass $(BIN)
 	install -m 644 main.py generate_manifest.py $(SHARE)/
 	install -m 644 grass_bridge/*.py $(SHARE)/grass_bridge/
+	install -m 644 LICENSE $(SHARE)/
+	# The AI Assistant reads this from the installed plugin folder, so it
+	# ships like the code. It is the plugin's own text, not GRASS's.
+	install -m 644 skills/grass/SKILL.md $(SHARE)/skills/grass/
 	install -m 755 bin/rustgis-grass-setup $(BIN)/rustgis-grass-setup
 	install -d $(DESTDIR)$(PREFIX)/share/man/man1
 	install -m 644 man/rustgis-grass-setup.1 $(DESTDIR)$(PREFIX)/share/man/man1/

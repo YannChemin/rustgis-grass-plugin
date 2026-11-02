@@ -77,8 +77,17 @@ def load_modules():
     return load_catalogue().get("modules") or {}
 
 
+def load_raster_commands():
+    """Return the command id to GRASS raster module map the generator wrote."""
+    return load_catalogue().get("rasterCommands") or {}
+
+
 def split_params(declared, given):
     """Split a tool's parameters into GRASS parameters and flags.
+
+    A ``file`` parameter is left out here: its value is only the file's name,
+    and the path GRASS reads is written by :func:`file_params` from the
+    contents RustGIS sent with the request.
 
     :param declared: the tool's parameter list from the manifest
     :param given: what the user supplied
@@ -87,7 +96,7 @@ def split_params(declared, given):
     params, flags = {}, []
     for spec in declared:
         name = spec["name"]
-        if name == "input":
+        if name == "input" or spec.get("kind") == "file":
             continue
         value = given.get(name, None)
         if value is None or value == "":
@@ -100,6 +109,49 @@ def split_params(declared, given):
             continue
         params[name] = value
     return params, flags
+
+
+def file_params(declared, req, run):
+    """Write the tool's ``file`` parameters and return them for GRASS.
+
+    RustGIS reads the file the user picked and sends its contents with the
+    request (docs/plugins.md > File parameters), so the bridge never opens a
+    path of its own: it writes what arrived into the run's folder and gives
+    GRASS that path.
+
+    :param declared: the tool's parameter list from the manifest
+    :param req: the tool request
+    :param run: the :class:`session.Run` whose folder the files go in
+    :return: ``({name: path}, [message, ...])``
+    """
+    sent = req.get("files") or {}
+    given = req.get("params") or {}
+    params, messages = {}, []
+    for spec in declared:
+        if spec.get("kind") != "file":
+            continue
+        name = spec["name"]
+        if name not in sent:
+            if given.get(name):
+                # The parameter holds the file's name and the contents come
+                # beside it; a name with nothing behind it would otherwise be
+                # dropped without a word.
+                raise session.GrassError(
+                    f"{name}: RustGIS sent no contents for '{given[name]}'; pick "
+                    "the file again in the Tools pane"
+                )
+            if spec.get("required"):
+                raise session.GrassError(
+                    f"{name} is required: pick the file in the Tools pane"
+                )
+            continue
+        path = run.input_file(name, sent[name])
+        params[name] = path
+        messages.append(
+            f"{name}: read {sent[name].get('name') or path} "
+            f"({os.path.getsize(path)} bytes) as RustGIS sent it."
+        )
+    return params, messages
 
 
 def run_tool(req, modules):
@@ -121,14 +173,42 @@ def run_tool(req, modules):
 
     params, flags = split_params(declared, given)
     with session.Run(progress=progress) as run:
+        files, file_notes = file_params(declared, req, run)
+        params.update(files)
         result, messages = run.vector_tool(module, geojson, params, flags)
+    messages += file_notes
 
-    count = len(result.get("features") or [])
-    messages.append(f"{module}: {count} features written.")
-    return {
-        "layers": [{"name": f"{layer} {module}", "geojson": result}],
-        "messages": messages[:200],
-    }
+    shaped, messages = split_result(result, f"{layer} {module}", module, messages)
+    return {**shaped, "messages": messages[:200]}
+
+
+def split_result(result, name, module, messages):
+    """Split a module's result into output layers and standalone tables.
+
+    A GRASS vector can hold attributes with no geometry (v.distance's upload
+    table, a module that writes only a table), and RustGIS takes those as
+    ``tables`` rather than as a layer with nothing to draw
+    (docs/plugins.md > The ABI). Both halves are reported, so neither is
+    dropped in silence.
+
+    :return: ``({"layers"?, "tables"?}, [message, ...])``
+    """
+    features = (result or {}).get("features") or []
+    drawn = [f for f in features if (f or {}).get("geometry")]
+    plain = [f for f in features if not (f or {}).get("geometry")]
+    shaped = {}
+    if drawn or not plain:
+        shaped["layers"] = [{"name": name, "geojson": {**result, "features": drawn}}]
+        messages.append(f"{module}: {len(drawn)} features written.")
+    if plain:
+        shaped["tables"] = [
+            {"name": f"{name} table", "geojson": {**result, "features": plain}}
+        ]
+        messages.append(
+            f"{module}: {len(plain)} rows had no geometry; they are a standalone "
+            f"table, '{name} table', not a layer."
+        )
+    return shaped, messages
 
 
 #: Said whenever the database is put in the browser: its folders hold GRASS's
@@ -214,17 +294,49 @@ def add_map(req):
     }
 
 
-def run_module(req):
-    """Run the module chosen in the tree on the chosen raster layer.
+def export_source(name, values):
+    """Have RustGIS write the chosen raster layer, and say what went out.
 
-    Every installed module is in the tree, but only one that reads a raster
-    and writes one can be run this way: a command has no form, so the bridge
-    can name the input and the output and nothing else. A module that needs
-    more than that has to be a tool, and a manifest holds 64 of those.
+    ``raster.info`` describes the layer before it leaves (its coordinate
+    system, its cell size, how many bands it has) and ``share.exportRaster``
+    says what it actually wrote, so a run on a downsampled overview or on one
+    band of many is reported rather than passed off as the whole raster.
+
+    :param name: the layer's name
+    :param values: the panel's widget values
+    :return: ``(path, [note, ...], info)``
+    """
+    info = call("raster.info", {"layer": name}) or {}
+    raster.check_source(info, name)
+    band, band_note = raster.choose_band(info, values)
+    exported = os.path.join(raster.output_dir(), f".export-{os.getpid()}.tif")
+    progress(f"Exporting {name}...")
+    params = {"layer": name, "path": exported}
+    if band:
+        params["band"] = band
+    written = call("share.exportRaster", params) or {}
+    notes = raster.source_notes(info, written)
+    if band_note:
+        notes.append(band_note)
+    return exported, notes, info
+
+
+def run_module(req, module=None):
+    """Run a raster module on the chosen raster layer.
+
+    Every installed module is in the panel's tree, and the common ones have a
+    ribbon command of their own (``module`` names that one). Either way only a
+    module that reads a raster and writes one can be run: a command has no
+    form, so the bridge names the input and the output and nothing else. A
+    module that needs more than that has to be a tool, and a manifest holds 64
+    of those.
+
+    :param module: the GRASS module a curated command runs, or None to take
+        the one chosen in the tree
     """
     values = (req.get("panel") or {}).get("values") or {}
     catalogue = load_catalogue().get("catalogue") or []
-    entry = raster.entry_for(catalogue, values.get("modules"))
+    entry = raster.entry_for(catalogue, module or values.get("modules"))
     argv = raster.free_module_args(entry)
 
     layers = call("host.layers") or []
@@ -232,13 +344,12 @@ def run_module(req):
     name = str(layer.get("name"))
     env = call("gp.env", {}) or {}
 
-    exported = os.path.join(raster.output_dir(), f".export-{os.getpid()}.tif")
     target = raster.output_path(name, entry["module"].replace(".", "-"))
-    progress(f"Exporting {name}...")
-    call("share.exportRaster", {"layer": name, "path": exported})
+    exported, source = export_source(name, values)[:2]
     try:
         with raster.RasterRun(progress=progress) as run:
             messages = run.free_module(entry["module"], argv, exported, target, env)
+        messages += source
     finally:
         try:
             os.remove(exported)
@@ -314,7 +425,6 @@ def run_raster_command(req):
     # so RustGIS's own Analysis Environment is what sets it.
     env = call("gp.env", {}) or {}
 
-    exported = os.path.join(raster.output_dir(), f".export-{os.getpid()}.tif")
     target = raster.output_path(name, operation["suffix"])
     centre = None
     if operation["module"] == "r.viewshed":
@@ -323,11 +433,11 @@ def run_raster_command(req):
         if centre[0] is None:
             raise session.GrassError("RustGIS did not say where the map is centred")
 
-    progress(f"Exporting {name}...")
-    call("share.exportRaster", {"layer": name, "path": exported})
+    exported, source, info = export_source(name, values)
     try:
         with raster.RasterRun(progress=progress) as run:
             messages = run.raster_tool(command, exported, target, values, centre, env)
+        messages += source
     finally:
         try:
             os.remove(exported)
@@ -349,6 +459,7 @@ def run_raster_command(req):
             "items": {
                 "raster": {"nodes": nodes},
                 "source": {"text": name},
+                "band": raster.band_slider(info),
                 "region": {"text": describe_region(env)},
                 "status": {"text": "\n".join(messages)},
             },
@@ -376,6 +487,15 @@ def panel_state(req):
         elif len(nodes) == 1:
             chosen = nodes[0]["id"]
     env = call("gp.env", {}) or {}
+    label = next((n["label"] for n in nodes if n["id"] == chosen), None)
+    # raster.info describes the layer RustGIS holds: its bands fill the band
+    # slider, so it covers exactly the ones this raster has.
+    try:
+        info = call("raster.info", {"layer": label}) if label else {}
+    except session.GrassError as e:
+        # Opening the panel must never fail over one unreadable layer.
+        info = {}
+        log(f"raster.info: {e}")
     installed = session.version()
     status = (
         f"GRASS GIS {installed}."
@@ -390,11 +510,11 @@ def panel_state(req):
             "items": {
                 "raster": {"nodes": nodes},
                 "source": {
-                    "text": next(
-                        (n["label"] for n in nodes if n["id"] == chosen),
-                        "No raster chosen",
-                    )
+                    "text": "\n".join([label] + raster.source_notes(info))
+                    if label
+                    else "No raster chosen"
                 },
+                "band": raster.band_slider(info),
                 "region": {"text": describe_region(env)},
                 "status": {"text": status},
                 "modules": {
@@ -415,6 +535,9 @@ def run_command(req):
         return panel_state(req)
     if command == "run-module":
         return run_module(req)
+    module = load_raster_commands().get(command)
+    if module:
+        return run_module(req, module)
     if command == "data-browse":
         return browse_database(req)
     if command == "data-folder":

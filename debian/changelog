@@ -1,3 +1,33 @@
+rustgis-grass-plugin (0.4.0) unstable; urgency=medium
+
+  * Tool parameters that take a file are offered instead of being left out:
+    the rules of v.segment and v.lrs.segment, v.extract's category list,
+    v.net's node file and v.rectify's control points. RustGIS hands the plugin
+    the file the user picks, which is written into the run's own folder. A
+    file a module writes but declares as an input (v.rectify's rmsfile) is
+    still left out and reported, because a file picker cannot name a file that
+    does not exist yet.
+  * Rows a module writes without geometry come back as a standalone table
+    rather than an undrawable layer, and are counted in the run's messages.
+  * The common raster modules have a command of their own on the ribbon, in
+    menus for terrain, hydrology, filters, surfaces and the sun. Every other
+    module is still reached from the panel's tree.
+  * Before a raster leaves, raster.info says what it is: a layer with no
+    coordinate system is refused rather than worked on in cells, the source's
+    size, cell size, coordinate system and value type are reported, and the
+    panel's new band slider says which band of a multi-band raster GRASS sees,
+    narrowed to the bands that raster has.
+  * A run on a raster RustGIS holds only as a downsampled overview says so:
+    the result is coarser than the file on disk.
+  * The package carries a skill for RustGIS's AI Assistant, so it knows which
+    requests GRASS is needed for at all, how the tools and raster commands are
+    addressed, and that the computational region decides the rest.
+  * The manifest states the RustGIS it needs (0.5.0, for panel trees and
+    compact ribbon menus), its author, homepage and licence, and a French
+    translation of the plugin's own interface text.
+
+ -- Yann Chemin <dr.yann.chemin@gmail.com>  Mon, 02 Nov 2026 07:30:00 +0100
+
 rustgis-grass-plugin (0.3.0) unstable; urgency=medium
 
   * A ribbon tab of its own, with groups for the database, the region, raster

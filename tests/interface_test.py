@@ -52,6 +52,18 @@ TASK = """<?xml version="1.0" encoding="UTF-8"?>
   <parameter name="label" type="string" required="no" multiple="no">
     <description>Free text</description>
   </parameter>
+  <parameter name="rules" type="string" required="no" multiple="no">
+    <description>Name of file containing rules</description>
+    <gisprompt age="old" element="file" prompt="file" />
+  </parameter>
+  <parameter name="rmsfile" type="string" required="no" multiple="no">
+    <description>Name of output file with RMS errors</description>
+    <gisprompt age="old" element="file" prompt="file" />
+  </parameter>
+  <parameter name="table" type="string" required="no" multiple="no">
+    <description>A database table this bridge cannot reach</description>
+    <gisprompt age="old" element="dbtable" prompt="dbtable" />
+  </parameter>
   <flag name="t">
     <description>Do the optional extra</description>
   </flag>
@@ -82,14 +94,21 @@ def test_maps_each_parameter_to_a_plugin_kind(form):
     assert kinds["method"] == "choice"
     assert kinds["label"] == "text"
     assert kinds["flag_t"] == "bool"
+    # RustGIS hands a tool the file the user picks, so a GRASS file input is
+    # offered instead of being left out.
+    assert kinds["rules"] == "file"
 
 
 def test_leaves_out_what_a_plugin_tool_cannot_carry(form):
     names = [p["name"] for p in form["params"]]
-    # The output is named by the bridge; a raster cannot reach a plugin tool.
+    # The output is named by the bridge; a raster, a file the module writes
+    # (v.rectify's rmsfile calls itself an old file), and a database table
+    # cannot reach a plugin tool.
     assert "output" not in names
     assert "elevation" not in names
-    assert form["skipped"] == ["elevation"]
+    assert "rmsfile" not in names
+    assert "table" not in names
+    assert form["skipped"] == ["elevation", "rmsfile", "table"]
 
 
 def test_drops_the_flags_every_module_has(form):
@@ -295,3 +314,91 @@ def test_a_parameter_declared_twice_is_kept_once_and_reported():
     form = interface.parse(xml)
     assert [p["name"] for p in form["params"]] == ["width"]
     assert "width (declared twice)" in form["skipped"]
+
+
+def test_a_file_parameter_is_written_and_given_to_grass(tmp_path):
+    import main
+
+    class Fake:
+        dir = str(tmp_path)
+        input_file = session.Run.input_file
+
+    declared = [
+        {"name": "input", "kind": "vectorLayer"},
+        {"name": "rules", "kind": "file"},
+    ]
+    req = {
+        "params": {"input": "Roads", "rules": "rules.txt"},
+        "files": {"rules": {"name": "rules.txt", "data": "TDEgMQ=="}},
+    }
+    params, messages = main.file_params(declared, req, Fake())
+    assert list(params) == ["rules"]
+    assert pathlib.Path(params["rules"]).read_bytes() == b"L1 1"
+    assert "rules.txt" in messages[0]
+    # Its own value is only the file's name, so it never reaches GRASS twice.
+    assert main.split_params(declared, req["params"]) == ({}, [])
+
+
+def test_a_required_file_that_was_not_picked_says_where_to_pick_it(tmp_path):
+    import main
+
+    declared = [{"name": "rules", "kind": "file", "required": True}]
+    with pytest.raises(session.GrassError, match="Tools pane"):
+        main.file_params(declared, {"params": {"rules": "r.txt"}, "files": {}}, None)
+
+
+def test_unreadable_file_contents_are_an_error_not_a_traceback(tmp_path):
+    class Fake:
+        dir = str(tmp_path)
+        input_file = session.Run.input_file
+
+    with pytest.raises(session.GrassError, match="unreadable"):
+        Fake().input_file("rules", {"name": "r.txt", "data": "not base64!!"})
+
+
+def test_rows_without_geometry_come_back_as_a_table():
+    import main
+
+    result = {
+        "type": "FeatureCollection",
+        "features": [
+            {"type": "Feature", "geometry": {"type": "Point", "coordinates": [1, 2]}},
+            {"type": "Feature", "geometry": None, "properties": {"dist": 3}},
+        ],
+    }
+    shaped, messages = main.split_result(result, "Roads v.distance", "v.distance", [])
+    assert len(shaped["layers"][0]["geojson"]["features"]) == 1
+    assert len(shaped["tables"][0]["geojson"]["features"]) == 1
+    assert shaped["tables"][0]["name"] == "Roads v.distance table"
+    assert any("no geometry" in m for m in messages)
+
+
+def test_a_result_that_is_all_geometry_has_no_table():
+    import main
+
+    result = {
+        "type": "FeatureCollection",
+        "features": [
+            {"type": "Feature", "geometry": {"type": "Point", "coordinates": [1, 2]}}
+        ],
+    }
+    shaped, _ = main.split_result(result, "Cities v.voronoi", "v.voronoi", [])
+    assert "tables" not in shaped and len(shaped["layers"]) == 1
+
+
+def test_an_empty_result_is_still_an_empty_layer():
+    import main
+
+    shaped, messages = main.split_result(
+        {"type": "FeatureCollection", "features": []}, "X", "v.clean", []
+    )
+    assert shaped["layers"][0]["geojson"]["features"] == []
+    assert "0 features" in messages[0]
+
+
+def test_a_file_named_with_no_contents_behind_it_is_an_error():
+    import main
+
+    declared = [{"name": "rules", "kind": "file"}]
+    with pytest.raises(session.GrassError, match="no contents"):
+        main.file_params(declared, {"params": {"rules": "r.txt"}, "files": {}}, None)

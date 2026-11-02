@@ -58,6 +58,90 @@ METRES_PER_DEGREE_LAT = 110540.0
 METRES_PER_DEGREE_LON = 111320.0
 
 
+def check_source(info, name):
+    """Fail loudly when the chosen raster cannot be worked on in GRASS.
+
+    ``raster.info`` says whether RustGIS read a coordinate system with the
+    raster. Without one, ``grass -c <file>`` makes a project with no
+    projection at all and every distance a module reports is in cells, which
+    is worse than refusing.
+
+    :param info: what ``raster.info`` answered
+    :raises session.GrassError: when the raster is not georeferenced
+    """
+    if info and info.get("georeferenced") is False:
+        raise session.GrassError(
+            f"{name} carries no coordinate system, so GRASS would work in cells, "
+            "not on the ground; georeference it first (Analyze > Imagery > "
+            "Georeference) or add a file that says what its coordinates are"
+        )
+
+
+def choose_band(info, values=None):
+    """Return the band to send to GRASS, 1-based, and why.
+
+    ``share.exportRaster`` writes one band of a raster that is not a colour
+    one, its first unless told otherwise, so a module would silently see band
+    1 of a hyperspectral cube. The panel's slider names the band instead.
+
+    :param info: what ``raster.info`` answered
+    :return: ``(band or None, note or None)``
+    """
+    bands = len((info or {}).get("bands") or [])
+    if bands <= 1:
+        return None, None
+    chosen = int((values or {}).get("band") or 1)
+    chosen = min(max(chosen, 1), bands)
+    names = [b.get("name") for b in info["bands"]]
+    label = names[chosen - 1] or f"band {chosen}"
+    return chosen, (
+        f"The raster has {bands} bands; band {chosen} ({label}) went to GRASS. "
+        "The panel's band slider chooses another."
+    )
+
+
+def band_slider(info):
+    """Return the panel item that lets the band be chosen, for ``raster.info``.
+
+    A slider's ends come from the manifest but a command may answer new ones
+    (docs/plugins.md > A panel), so the slider covers exactly the bands the
+    chosen raster has and carries their names.
+    """
+    bands = (info or {}).get("bands") or []
+    if len(bands) <= 1:
+        return {"min": 1, "max": 1, "labels": ["the only band"], "enabled": False}
+    labels = [str(b.get("name") or f"band {i}") for i, b in enumerate(bands, 1)]
+    return {"min": 1, "max": len(bands), "labels": labels, "enabled": True}
+
+
+def source_notes(info, export=None):
+    """Return what to say about the raster that went to GRASS.
+
+    :param info: what ``raster.info`` answered
+    :param export: what ``share.exportRaster`` answered: it names the overview
+        it wrote when the layer RustGIS holds is a downsampled one, which a
+        module would otherwise be run on without anybody being told
+    """
+    notes = []
+    info = info or {}
+    if info:
+        cell = info.get("cellSize") or []
+        size = f"{cell[0]:g} by {cell[1]:g}" if len(cell) == 2 else "unknown"
+        notes.append(
+            f"Source: {info.get('width', '?')} by {info.get('height', '?')} cells of "
+            f"{size} in {info.get('crs') or 'an unnamed coordinate system'}, "
+            f"{info.get('dataType') or 'unknown'} values."
+        )
+    full = (export or {}).get("overviewOf")
+    if full and len(full) == 2:
+        notes.append(
+            f"RustGIS holds a {export.get('width')} by {export.get('height')} overview "
+            f"of this {full[0]} by {full[1]} raster, and that overview is what GRASS "
+            "ran on: the result is coarser than the file on disk."
+        )
+    return notes
+
+
 def choose_raster(layers, chosen=None):
     """Return the raster layer to work on.
 

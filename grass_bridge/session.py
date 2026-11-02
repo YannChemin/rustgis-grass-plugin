@@ -12,6 +12,8 @@ when mmctl is installed; without it the run is unaffected.
 SPDX-License-Identifier: Unlicense
 """
 
+import base64
+import binascii
 import json
 import os
 import shutil
@@ -266,6 +268,35 @@ class Run:
 
     def __exit__(self, *_):
         self.close()
+
+    def input_file(self, param, given):
+        """Write a file RustGIS handed the tool, and return its path.
+
+        A tool's ``file`` parameter arrives as ``{"name", "data"}`` with the
+        contents in base64 (RustGIS reads the file the user picked, so the
+        plugin never reads a path of its own), and GRASS wants a path. The
+        file goes in the run's own folder and dies with it.
+
+        :param param: the parameter's name, for the message
+        :param given: the request's entry for it
+        :return: the path written
+        :raises GrassError: when the entry is not a file RustGIS sent
+        """
+        blob = (given or {}).get("data")
+        if not isinstance(blob, str):
+            raise GrassError(f"{param}: RustGIS sent no contents for the file")
+        try:
+            raw = base64.b64decode(blob, validate=True)
+        except (ValueError, binascii.Error) as e:
+            raise GrassError(
+                f"{param}: the file's contents are unreadable ({e})"
+            ) from e
+        stem = os.path.basename(str(given.get("name") or param)) or param
+        stem = "".join(c if c.isalnum() or c in "-_." else "_" for c in stem)[:64]
+        path = os.path.join(self.dir, f"{param}_{stem}")
+        with open(path, "wb") as fh:
+            fh.write(raw)
+        return path
 
     def left(self):
         """Return the seconds a step may take, from the run's deadline.

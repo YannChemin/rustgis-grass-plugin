@@ -9,6 +9,18 @@ two-minute cap on commands rather than by the ABI, and the computational region 
 drop features silently rather than only misalign them. See the README and
 [opengeos/RustGIS#1249](https://github.com/opengeos/RustGIS/issues/1249)._
 
+_Re-checked 2026-11-02 against RustGIS v0.5.0. What changed under the points below: a process
+plugin's tool **does** have a progress channel — it runs in the background with a Cancel button
+and sends `{"progress": …}` lines, so point 5 of section 5 is answered for tools (a command
+still has none, and still stops after two minutes); `raster.info` now answers the coordinate
+system, cell size, bands and whether the layer is georeferenced at all, which is how point 3's
+CRS-less-project gotcha is caught before a run; and the ABI has gained `file` tool parameters,
+`tables` in a tool's result, panel trees, nested ribbon menus, plugin skills for the AI
+Assistant and `minRustgisVersion` — all of which the prototype now uses (see the README's
+"What of RustGIS it uses"). Points 1, 2, 4 and 6 stand: there is still no session-scoped
+mapset, no region parameter of RustGIS's own, no voxel layer, and no answer to the volume of
+modules beyond a curated subset plus the panel's tree._
+
 **Short answer: yes, and the hole is already the right shape.** RustGIS has a public, documented
 extension point for exactly this — an out-of-process tool suite whose tool forms are read from the
 program itself at startup (`rustgis_analysis::register_external`). The GeoLibre/Whitebox bridge

@@ -71,6 +71,63 @@ PREFERRED = [
 #: Where GRASS keeps its own modules, and where a user's addons go.
 ADDON_DIR = "~/.grass8/addons/bin"
 
+#: The first RustGIS that has everything this manifest uses: panel trees and
+#: compact ribbon columns with nested menus (RustGIS 0.5.0), and tool `file`
+#: parameters and assistant skills (earlier). An older RustGIS refuses a tab
+#: that names a panel, so it is better to be refused with a reason than to
+#: load with half the plugin missing.
+MIN_RUSTGIS = "0.5.0"
+
+#: The most bands the panel's band slider reaches before raster.info narrows
+#: it to the chosen raster: enough for a hyperspectral cube.
+MAX_BANDS = 512
+
+#: Skills the package carries for the AI Assistant, as skills/<name>/SKILL.md.
+SKILLS = ["grass"]
+
+#: Raster modules that get a command of their own, by the ribbon menu they go
+#: in. A manifest holds 256 commands, so the common work of each family is on
+#: the ribbon instead of only in the panel's tree; anything else is still
+#: reached by choosing it there and pressing Run Module. Each runs with
+#: GRASS's own defaults over the chosen layer, which is all a command (no
+#: form) can do, and only the modules the installation actually has become
+#: commands.
+RASTER_COMMANDS = {
+    "Terrain": [
+        "r.slope.aspect",
+        "r.relief",
+        "r.param.scale",
+        "r.geomorphon",
+        "r.skyview",
+        "r.local.relief",
+    ],
+    "Hydrology": [
+        "r.watershed",
+        "r.fill.dir",
+        "r.flow",
+        "r.stream.extract",
+        "r.terraflow",
+        "r.topidx",
+    ],
+    "Filters": [
+        "r.neighbors",
+        "r.mfilter",
+        "r.resamp.interp",
+        "r.resamp.stats",
+        "r.resamp.filter",
+        "r.denoise",
+    ],
+    "Surfaces": [
+        "r.fillnulls",
+        "r.grow.distance",
+        "r.buffer",
+        "r.thin",
+        "r.clump",
+        "r.texture",
+    ],
+    "Sun": ["r.sun", "r.sunmask", "r.horizon", "r.sunhours"],
+}
+
 
 def installed_modules(grass):
     """Return every module name the installation offers, sorted.
@@ -259,6 +316,22 @@ PANEL = {
         },
         {"kind": "text", "id": "source", "label": "Chosen layer"},
         {
+            "kind": "slider",
+            "id": "band",
+            "label": "Band sent to GRASS",
+            "help": "RustGIS writes one band of a raster that is not a colour "
+            "one, so this says which. The ends declared here cover a "
+            "hyperspectral cube; raster.info narrows them to the chosen "
+            "layer's own bands, with their names, as soon as there is one.",
+            "min": 1,
+            # RustGIS keeps a slider's value within the ends the manifest
+            # declares until a command answers new ones, so the declared
+            # maximum has to cover the widest raster rather than one band.
+            "max": MAX_BANDS,
+            "default": 1,
+            "steps": True,
+        },
+        {
             "kind": "text",
             "id": "region",
             "label": "Computational region",
@@ -324,6 +397,113 @@ PANEL = {
         {"kind": "text", "id": "status", "label": "Last run"},
     ],
 }
+
+
+def raster_command_id(module):
+    """Return the manifest's local command id for a raster module."""
+    return module.replace(".", "-")
+
+
+def raster_commands(catalogue):
+    """Return a command for each curated raster module the installation has.
+
+    :param catalogue: the catalogue entries, which say what each module reads
+        and writes
+    :return: ``([command, ...], {command id: module}, {menu: [command id]})``
+    """
+    entries = {entry["module"]: entry for entry in catalogue}
+    commands, modules, menus = [], {}, {}
+    for menu, wanted in RASTER_COMMANDS.items():
+        for module in wanted:
+            entry = entries.get(module)
+            if not entry or not entry.get("raster"):
+                continue
+            cid = raster_command_id(module)
+            commands.append(
+                {
+                    "id": cid,
+                    "label": module,
+                    "help": (
+                        f"{module}: {entry['summary']}" if entry["summary"] else module
+                    )[:300]
+                    + " Runs on the layer chosen in the GRASS GIS panel, with "
+                    "GRASS's own defaults.",
+                    "icon": "stats",
+                    "params": "{} (the GRASS GIS panel chooses the layer, the "
+                    "band and the region)",
+                }
+            )
+            modules[cid] = module
+            menus.setdefault(menu, []).append(cid)
+    return commands, modules, menus
+
+
+#: The plugin's own interface text in French, keyed by the English exactly as
+#: this file writes it (RustGIS looks a string up as the manifest declares it,
+#: line breaks included). Only the plugin's own words are here: a tool's name,
+#: summary and parameter labels come from the GRASS installation, which has
+#: its own translations, and are left as GRASS wrote them.
+FRENCH = {
+    "GRASS GIS Tools": "Outils GRASS GIS",
+    "Database": "Base de donnees",
+    "Region": "Region",
+    "Raster": "Raster",
+    "Vector": "Vecteur",
+    "Terrain": "Relief",
+    "Hydrology": "Hydrologie",
+    "Filters": "Filtres",
+    "Surfaces": "Surfaces",
+    "Sun": "Soleil",
+    "GRASS GIS": "GRASS GIS",
+    "Slope": "Pente",
+    "Aspect": "Exposition",
+    "Viewshed": "Bassin de visibilite",
+    "Run\nModule": "Lancer le\nmodule",
+    "GRASS\nDatabase": "Base GRASS",
+    "Add\nMap": "Ajouter\nla carte",
+    "Browse\nMapset": "Parcourir\nle jeu",
+    "Region =\nMap View": "Region =\nvue",
+    "Region =\nWhole Layer": "Region =\ncouche",
+    "Refresh\nRasters": "Actualiser\nles rasters",
+    "GRASS database": "Base de donnees GRASS",
+    "Projects and mapsets": "Projets et jeux de donnees",
+    "Raster layer": "Couche raster",
+    "Chosen layer": "Couche choisie",
+    "Band sent to GRASS": "Bande envoyee a GRASS",
+    "Computational region": "Region de calcul",
+    "Cell size in the raster's own units (0: from the environment)": (
+        "Taille de cellule dans les unites du raster (0 : celle de l'environnement)"
+    ),
+    "Slope in percent instead of degrees": "Pente en pourcents plutot qu'en degres",
+    "Viewer's height above the ground (m)": "Hauteur de l'observateur (m)",
+    "Viewshed range (km; 0 for no limit)": "Portee de visibilite (km ; 0 : sans limite)",
+    "Viewshed follows the curvature of the earth": (
+        "La visibilite tient compte de la courbure de la Terre"
+    ),
+    "Every GRASS module installed": "Tous les modules GRASS installes",
+    "Last run": "Derniere execution",
+}
+
+
+def i18n():
+    """Return the manifest's translation table.
+
+    :return: ``{"fr": {...}}``
+    """
+    return {"fr": dict(FRENCH)}
+
+
+def check_i18n(manifest):
+    """Name every translation whose English string is not in the manifest.
+
+    A translation RustGIS never looks up is dead weight and, worse, hides a
+    label that was reworded here and not there, so the generator says so
+    instead of writing it out quietly.
+    """
+    text = json.dumps(manifest, ensure_ascii=False)
+    return sorted(
+        k for k in FRENCH if json.dumps(k, ensure_ascii=False)[1:-1] not in text
+    )
 
 
 def tool_id(module):
@@ -416,43 +596,65 @@ def build():
         f"{len(catalogue)} modules in the tree"
     )
 
+    raster_cmds, raster_modules, raster_menus = raster_commands(catalogue)
+    print(
+        f"  {len(raster_cmds)} raster modules got a command of their own, in "
+        f"{len(raster_menus)} ribbon menus"
+    )
+    files = sum(
+        1 for tool in tools for param in tool["params"] if param["kind"] == "file"
+    )
+    print(f"  {files} tool parameters are files the user picks")
+
     manifest = {
         "id": "grass-vector",
         "name": "GRASS GIS Tools",
-        "version": "0.3.0",
+        "version": "0.4.0",
         "description": (
             "Runs GRASS GIS modules: vector modules as geoprocessing tools, and "
             "every installed module from a panel and a tab of its own. GRASS "
             "must be installed separately; nothing of it ships here."
         ),
+        "author": "Yann Chemin",
+        "homepage": "https://github.com/YannChemin/rustgis-grass-plugin",
+        "license": "Unlicense",
         "runtime": "process",
         "run": {
             "windows": ["python", "main.py"],
             "default": ["python3", "main.py"],
         },
+        "minRustgisVersion": MIN_RUSTGIS,
         # The raster and database commands have RustGIS write and read the
-        # files they work on, which needs both.
+        # files they work on, and a tool's `file` parameter is handed to the
+        # plugin, which needs both.
         "permissions": ["edit", "files"],
-        "commands": COMMANDS,
+        "commands": COMMANDS + raster_cmds,
         "tools": tools,
-        "tab": tab(tools),
+        "tab": tab(tools, raster_menus),
         "panel": PANEL,
+        "skills": list(SKILLS),
+        "i18n": i18n(),
     }
     catalogue_out = {
         "modules": modules,
+        "rasterCommands": raster_modules,
         "skipped": notes,
         "catalogue": catalogue,
         "unreadable": sorted(set(failed)),
         "toolsLeftOut": left_out,
     }
+    stale = check_i18n({k: v for k, v in manifest.items() if k != "i18n"})
+    if stale:
+        print(f"  WARNING: translations for text no longer in the manifest: {stale}")
     return manifest, catalogue_out
 
 
-def tab(tools):
+def tab(tools, raster_menus=None):
     """Return the plugin's own ribbon tab.
 
-    A tab holds 8 groups and a group 16 buttons, so the vector tools go into
-    menus: one per toolbox, which is one per GRASS keyword.
+    A tab holds 8 groups and a small group 48 controls, so the vector tools and
+    the curated raster modules go into menus: one per toolbox, which is one per
+    GRASS keyword, and one per raster theme.
     """
     boxes = {}
     for tool in tools:
@@ -488,6 +690,10 @@ def tab(tools):
                     "raster-aspect",
                     "raster-viewshed",
                     "run-module",
+                    *(
+                        {"menu": menu, "items": items[:32]}
+                        for menu, items in sorted((raster_menus or {}).items())
+                    ),
                 ],
             },
             {"label": "Vector", "layout": "small", "items": menus[:48]},

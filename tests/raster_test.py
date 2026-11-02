@@ -322,3 +322,64 @@ def test_a_size_is_readable():
     assert database._size(512) == "512 bytes"
     assert database._size(2048) == "2.0 kB"
     assert database._size(5 * 1024 * 1024) == "5.0 MB"
+
+
+def test_a_raster_with_no_coordinate_system_is_refused():
+    with pytest.raises(session.GrassError, match="no coordinate system"):
+        raster.check_source({"georeferenced": False}, "scan.tif")
+
+
+def test_a_georeferenced_raster_passes_and_so_does_a_silent_one():
+    raster.check_source({"georeferenced": True}, "dem")
+    raster.check_source({}, "dem")  # raster.info said nothing; do not guess.
+
+
+def test_a_single_band_raster_needs_no_band_choice():
+    band, note = raster.choose_band({"bands": [{"name": "elevation"}]}, {})
+    assert band is None and note is None
+
+
+def test_the_panel_chooses_the_band_and_it_is_reported():
+    info = {"bands": [{"name": "b1"}, {"name": "b2"}, {"name": "b3"}]}
+    band, note = raster.choose_band(info, {"band": 2})
+    assert band == 2
+    assert "3 bands" in note and "b2" in note
+
+
+def test_a_band_outside_the_raster_is_brought_back_inside():
+    info = {"bands": [{"name": "b1"}, {"name": "b2"}]}
+    assert raster.choose_band(info, {"band": 9})[0] == 2
+    assert raster.choose_band(info, {"band": 0})[0] == 1
+
+
+def test_the_band_slider_covers_exactly_the_bands_there_are():
+    item = raster.band_slider({"bands": [{"name": "red"}, {"name": "nir"}]})
+    assert item["min"] == 1 and item["max"] == 2
+    assert item["labels"] == ["red", "nir"] and item["enabled"] is True
+    assert raster.band_slider({"bands": [{"name": "only"}]})["enabled"] is False
+
+
+def test_the_source_is_described_in_its_own_units():
+    note = raster.source_notes(
+        {
+            "width": 100,
+            "height": 50,
+            "cellSize": [30, 30],
+            "crs": "EPSG:32631",
+            "dataType": "Float32",
+        }
+    )[0]
+    assert "100 by 50" in note and "30 by 30" in note and "EPSG:32631" in note
+
+
+def test_a_run_on_an_overview_says_the_result_is_coarser():
+    notes = raster.source_notes(
+        {"width": 1000, "height": 500},
+        {"width": 1000, "height": 500, "overviewOf": [8000, 4000]},
+    )
+    assert any("overview" in n and "coarser" in n for n in notes)
+
+
+def test_a_full_resolution_export_adds_no_overview_note():
+    notes = raster.source_notes({"width": 10, "height": 10}, {"path": "x.tif"})
+    assert not any("overview" in n for n in notes)

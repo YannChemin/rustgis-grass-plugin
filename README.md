@@ -24,14 +24,14 @@ Apache-2.0 GIS this way.
 
 ## What it offers
 
-Everything the installation has. On this machine that is **1,178 modules**, addons included, of
-which **1,172** could describe themselves:
+Everything the installation has. On this machine that is **1,179 modules**, addons included, of
+which **1,174** could describe themselves:
 
 | Family | Modules | Family | Modules |
 |---|---|---|---|
 | Raster (`r.*`) | 454 | General (`g.*`) | 55 |
 | Vector (`v.*`) | 223 | Display (`d.*`) | 49 |
-| Imagery (`i.*`) | 174 | 3D Raster (`r3.*`) | 35 |
+| Imagery (`i.*`) | 176 | 3D Raster (`r3.*`) | 35 |
 | Temporal (`t.*`) | 74 | Database (`db.*`) | 22 |
 | Planetary (`p.*`) | 67 | Miscellaneous (`m.*`) | 14 |
 
@@ -40,14 +40,14 @@ They are reached three ways, because the ABI gives three and each has a ceiling:
 | Route | Covers | Ceiling |
 |---|---|---|
 | **Tools**, with a generated form in the Tools pane | 64 vector modules | a manifest holds **64 tools**, and a tool takes no raster, so only vector modules qualify: 128 do, half of them fit |
-| **Commands** on the ribbon | Slope, Aspect, Viewshed, the region and the database | a manifest holds **256 commands**, and a command opens no dialog, so each needs the panel to be told anything |
-| **Run Module**, from the panel's tree | **all 1,172**, of which the **357** that read a raster and write one can be run | a command has no form, so only the input and the output are named; everything else is GRASS's default |
+| **Commands** on the ribbon | Slope, Aspect, Viewshed, **27 common raster modules** in menus by theme, the region and the database | a manifest holds **256 commands**, and a command opens no dialog, so each needs the panel to be told anything |
+| **Run Module**, from the panel's tree | **all 1,174**, of which the **358** that read a raster and write one can be run | a command has no form, so only the input and the output are named; everything else is GRASS's default |
 
 The tree is searchable and marks with **▸** the modules Run Module can drive. The 64 modules that
 could have been tools but did not fit are listed in `modules.json` under `toolsLeftOut`, as are
 the five that could not be read at all.
 
-So "every GRASS module" is true for *reaching* them and false for *forms*: 64 of 1,172 get one.
+So "every GRASS module" is true for *reaching* them and false for *forms*: 64 of 1,174 get one.
 That gap is the ABI's, not GRASS's, and it is what a crate in the RustGIS tree would close.
 
 ### Its own tab
@@ -59,15 +59,39 @@ against a documented limit of 16:
 |---|---|
 | Database | the panel, GRASS Database, Add Map, Browse Mapset |
 | Region | Region = Map View, Region = Whole Layer, Refresh Rasters |
-| Raster | Slope, Aspect, Viewshed, Run Module |
+| Raster | Slope, Aspect, Viewshed, Run Module, and menus of raster modules: Terrain, Hydrology, Filters, Surfaces, Sun |
 | Vector | the 64 tools, in menus by GRASS keyword (Proximity, Geometry, Network, LIDAR…) |
+
+### What of RustGIS it uses
+
+Everything the plugin ABI offers that a GRASS bridge can make use of, as of RustGIS 0.5.0:
+
+| RustGIS gives | The plugin uses it for |
+|---|---|
+| `tools` with a generated form | 64 vector modules, with their GRASS parameters, flags and choices |
+| `file` tool parameters | the rules, node and control-point files of `v.segment`, `v.net`, `v.extract`, `v.rectify`, `v.lrs.segment` |
+| `tables` beside `layers` in a tool's result | rows a module writes without geometry |
+| `commands` (256 of them) | the shaped slope/aspect/viewshed runs, 27 common raster modules, the region and the database |
+| a `tab` of its own, with compact columns and nested menus | the GRASS tab: Database, Region, Raster (with menus by theme), Vector (menus by GRASS keyword) |
+| a `panel`, with `tree` widgets that search | the GRASS database, the map's rasters, the band, and all 1,174 modules |
+| `raster.info` | refusing a raster with no coordinate system, describing the source, and sizing the band slider |
+| `share.exportRaster`'s answer | saying when a run was made on a downsampled overview |
+| `gp.env` | the computational region |
+| `progress` messages | what a run is doing now, in the Tools pane |
+| `skills` | a skill telling the AI Assistant when GRASS is needed and how these tools are addressed |
+| `i18n` | the plugin's own interface text in French (GRASS's own text comes from the installation) |
+| `minRustgisVersion` | 0.5.0, so an older RustGIS says why rather than loading half of it |
+
+What it still cannot use: a raster or 3D raster as a **tool** parameter (there is none), several
+input layers at once, a module's output file, a database table, and more than 64 tools or 32
+parameters per tool.
 
 ## Install
 
 From the package, on Debian or Ubuntu:
 
 ```sh
-sudo apt install ./dist/rustgis-grass-plugin_0.3.0_all.deb
+sudo apt install ./dist/rustgis-grass-plugin_0.4.0_all.deb
 rustgis-grass-setup          # once per user; again after upgrading GRASS
 ```
 
@@ -115,6 +139,18 @@ which are part of its GPL documentation. They are generated from your installati
 5. Every run reports the projection it used, the region it set, and each distinct GRASS warning
    with how often it was raised.
 
+A parameter that takes a file is a RustGIS `file` parameter: the user picks the file in the
+Tools pane, RustGIS reads it and sends its contents, and the bridge writes them into the run's
+own folder for GRASS to read. That is how `v.segment`'s and `v.lrs.segment`'s rules,
+`v.extract`'s category list, `v.net`'s node file and `v.rectify`'s control points are reachable;
+the run says which file it read and how big it was. A file a module *writes* but declares as an
+input (`v.rectify`'s `rmsfile`) is left out and reported instead, because a file picker cannot
+name a file that does not exist yet.
+
+Rows a module writes with no geometry — `v.distance`'s upload table, say — come back as a
+standalone **table** rather than a layer with nothing to draw, and the messages count both
+halves, so neither is dropped in silence.
+
 ## How a raster run works
 
 A tool cannot do this. RustGIS's plugin ABI gives a tool `layer`, `vectorLayer`, `polygonLayer`,
@@ -125,13 +161,22 @@ command its permissions allow, which is enough to carry a raster in and out:
 
 1. `host.layers` lists the map's layers; the panel's tree chooses one of the rasters (without a
    choice, the active one, or the only one).
-2. `share.exportRaster` writes it as a GeoTIFF (`files`).
-3. A throwaway GISDBASE is made, with a project taking **the raster's own coordinate system**, so
+2. `raster.info` describes it before it leaves: its coordinate system, size, cell size, value
+   type and bands. A layer RustGIS read **without a coordinate system is refused** here, because
+   `grass -c` on such a file makes a project with no projection and every distance the module
+   reports is then in cells.
+3. `share.exportRaster` writes it as a GeoTIFF (`files`). It writes **one band** of a raster that
+   is not a colour one, so the panel's band slider says which; the slider's ends and the band
+   names come from `raster.info`, so a hyperspectral cube's bands are all reachable, and the run
+   says which band GRASS saw. If RustGIS holds the layer only as a **downsampled overview**, the
+   export says so (`overviewOf`) and the run reports that its result is coarser than the file on
+   disk.
+4. A throwaway GISDBASE is made, with a project taking **the raster's own coordinate system**, so
    nothing is reprojected on the way in or out. `r.in.gdal` imports it and `g.region raster=…`
    sets the region from it, which **Analyze › Geoprocessing › Environments** then narrows (see
    below).
-4. The module runs, and `r.out.gdal` writes the result.
-5. `layer.addData` adds that file as a raster layer (`files` and `edit`), and the run reports the
+5. The module runs, and `r.out.gdal` writes the result.
+6. `layer.addData` adds that file as a raster layer (`files` and `edit`), and the run reports the
    projection, the region's cells and extent, what the numbers mean, and each distinct GRASS
    warning with its count.
 
@@ -212,8 +257,10 @@ So the cap is generous for a per-cell module and useless for `r.watershed` on a 
 That ceiling, not the ABI, is now the reason raster work belongs in a crate rather than a plugin.
 `generate_manifest.py` prints what it had to leave out of each **tool**, and the mapper refuses
 what RustGIS would not take rather than offering something that cannot work: a raster parameter,
-a name with a digit in it (`v.gsflow.segments` has `width1`), and a name the module declares twice
-(the same module declares four of them twice over). Reading all 1,178 forms takes about three and
+a name with a digit in it (`v.gsflow.segments` has `width1`), a name the module declares twice
+(the same module declares four of them twice over), and a file the module writes although it
+declares it as one it reads (`v.rectify`'s `rmsfile`), since a file picker cannot name a file
+that does not exist yet. Reading all 1,179 forms takes about three and
 a half minutes, 24 at a time.
 
 ## Watch out
@@ -225,6 +272,9 @@ a half minutes, 24 at a time.
   because each module call builds its own database. A session-scoped mapset would amortise it.
 - Several input maps and 3D (`r3.*`) data are not offered; a raster reaches a command, never a
   tool.
+- A raster that RustGIS holds as an overview is exported as that overview, and a raster that is
+  not a colour one is exported one band at a time. Both are reported in the run's messages, so
+  read them before taking a result for the whole file at full resolution.
 - A tree widget only keeps a value that was among the nodes the plugin last sent, so a script
   passing `{"panel": {"raster": "3"}}` must run `raster-state` first, as the panel does when it
   opens.

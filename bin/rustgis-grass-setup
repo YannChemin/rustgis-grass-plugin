@@ -46,7 +46,11 @@ if ! command -v grass >/dev/null && [ -z "${RUSTGIS_GRASS:-}" ]; then
 fi
 
 mkdir -p "$dst"
-cp -a "$src/main.py" "$src/generate_manifest.py" "$src/grass_bridge" "$dst/"
+# skills/ carries the plugin's skill for RustGIS's AI Assistant; the manifest
+# generated below lists it, so it has to be beside the code.
+cp -a "$src/main.py" "$src/generate_manifest.py" "$src/grass_bridge" \
+	"$src/skills" "$dst/"
+if [ -f "$src/LICENSE" ]; then cp -a "$src/LICENSE" "$dst/"; fi
 cd "$dst"
 python3 generate_manifest.py
 rustgis-cli plugins install "$dst"

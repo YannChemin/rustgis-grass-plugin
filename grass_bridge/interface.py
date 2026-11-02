@@ -26,6 +26,18 @@ PLUMBING_PARAMS = frozenset({"input", "output", "layer"})
 MAX_PARAMS = 32
 
 
+#: A file parameter the module writes rather than reads, whatever its
+#: ``age`` says. Such a file would have to exist before the user could pick
+#: it, and the module would then write over it outside RustGIS, so it is left
+#: out and reported like any other parameter the bridge cannot offer.
+WRITES_FILE = re.compile(r"\boutput\b|\bto write\b|\bwritten\b", re.IGNORECASE)
+
+
+def _about(param):
+    """Return a parameter's label and description as one string."""
+    return f"{_text(param.find('label'))} {_text(param.find('description'))}"
+
+
 def _text(node):
     """Return a node's text as one tidy line, or an empty string."""
     if node is None or not node.text:
@@ -37,7 +49,8 @@ def _kind_of(param):
     """Return the RustGIS parameter kind for one GRASS ``<parameter>``.
 
     ``None`` means the bridge cannot offer it: an output name, or an input of
-    a kind a plugin tool cannot receive (a raster, a 3D raster, a file).
+    a kind a plugin tool cannot receive (a raster, a 3D raster, a database
+    table).
     """
     prompt = param.find("gisprompt")
     if prompt is not None:
@@ -47,7 +60,16 @@ def _kind_of(param):
             return None  # An output; the bridge names it.
         if element == "vector":
             return "vectorLayer"
-        if element in ("raster", "cell", "raster_3d", "grid3", "file", "dbtable"):
+        if element == "file":
+            # RustGIS hands a tool the file the user picks (manifest kind
+            # "file", which the "files" permission covers), so the rules and
+            # control-point files of v.net, v.segment, v.extract, v.rectify
+            # and v.lrs.segment are reachable instead of being left out.
+            # Some modules declare a file they *write* as age="old" all the
+            # same (v.rectify's rmsfile), and a file picker cannot name a file
+            # that does not exist yet, so the module's own words decide.
+            return None if WRITES_FILE.search(_about(param)) else "file"
+        if element in ("raster", "cell", "raster_3d", "grid3", "dbtable"):
             return None
         if element in ("dbcolumn", "dbcolumn_name"):
             return "field"
