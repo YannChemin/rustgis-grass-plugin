@@ -361,13 +361,18 @@ def run_module(req, module=None):
     for text in messages:
         log(text)
     call("host.notify", {"text": f"{entry['module']}: {messages[0]}"})
-    nodes, notes = raster.catalogue_tree(catalogue, entry["module"])
+    recent = raster.remember(entry["module"])
+    family = raster.mode_family(values.get("mode"))
+    nodes, notes = raster.catalogue_tree(
+        catalogue, entry["module"], recent, family=family
+    )
     return {
         "layer": added,
         "messages": messages + notes,
         "panel": {
             "items": {
                 "modules": {"nodes": nodes},
+                "details": {"text": raster.module_details(entry)},
                 "status": {"text": "\n".join(messages)},
             }
         },
@@ -451,6 +456,7 @@ def run_raster_command(req):
     for text in messages:
         log(text)
     call("host.notify", {"text": f"{operation['label']}: {messages[0]}"})
+    raster.remember(operation["module"])
     return {
         "layer": added,
         "messages": messages,
@@ -467,14 +473,23 @@ def run_raster_command(req):
     }
 
 
-def panel_state(req):
+def panel_state(req, mode=None):
     """Answer the panel's state when it is opened.
 
     It reads the map only, so it is no undo step.
+
+    :param mode: a mode tree node to show, such as ``mode/imagery``; without
+        one the mode the panel already had is kept
     """
     layers = call("host.layers") or []
     nodes = raster.raster_nodes(layers)
-    values = (req.get("panel") or {}).get("values") or {}
+    values = dict((req.get("panel") or {}).get("values") or {})
+    if mode is not None:
+        values["mode"] = mode
+    mode = values.get("mode")
+    if mode not in raster.MODE_FAMILIES:
+        mode = "mode/all"
+    family = raster.mode_family(mode)
     chosen = values.get("raster")
     if chosen is not None and not any(n["id"] == str(chosen) for n in nodes):
         chosen = None
@@ -502,11 +517,29 @@ def panel_state(req):
         if installed
         else "GRASS GIS was not found. Install it, or set RUSTGIS_GRASS to its launcher."
     )
+    catalogue = load_catalogue().get("catalogue") or []
+    runnable = sum(1 for entry in catalogue if entry.get("runnable"))
+    if catalogue:
+        status += (
+            f" {runnable} of {len(catalogue)} modules run from here with "
+            "GRASS's own defaults; the tree gives the reason for the others."
+        )
+        if family:
+            status += f" Showing {family.lower()} modules only."
     if not nodes:
         status += " The map has no raster layer."
+    chosen_module = raster.entry_for(catalogue, values.get("modules"), quietly=True)
+    module_nodes, _ = raster.catalogue_tree(
+        catalogue,
+        values.get("modules"),
+        raster.read_recents(),
+        family=family,
+    )
+    shown = {"raster": chosen} if chosen else {}
+    shown["mode"] = mode
     return {
         "panel": {
-            "values": {"raster": chosen} if chosen else {},
+            "values": shown,
             "items": {
                 "raster": {"nodes": nodes},
                 "source": {
@@ -517,11 +550,9 @@ def panel_state(req):
                 "band": raster.band_slider(info),
                 "region": {"text": describe_region(env)},
                 "status": {"text": status},
-                "modules": {
-                    "nodes": raster.catalogue_tree(
-                        load_catalogue().get("catalogue") or []
-                    )[0]
-                },
+                "mode": {"nodes": raster.mode_nodes(catalogue)},
+                "modules": {"nodes": module_nodes},
+                "details": {"text": raster.module_details(chosen_module)},
                 **database_panel(values.get("database")),
             },
         }
@@ -533,6 +564,10 @@ def run_command(req):
     command = req.get("id")
     if command == "raster-state":
         return panel_state(req)
+    if command == "imagery-state":
+        return panel_state(req, "mode/imagery")
+    if command == "all-state":
+        return panel_state(req, "mode/all")
     if command == "run-module":
         return run_module(req)
     module = load_raster_commands().get(command)

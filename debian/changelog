@@ -1,3 +1,30 @@
+rustgis-grass-plugin (0.5.0) unstable; urgency=medium
+
+  * The panel's catalogue now says what can actually be run: a module is
+    offered to Run Module only when it reads one raster, writes one, needs no
+    second required raster, and leaves every other required parameter to a
+    default. On this machine that is 88 of 1,174 modules, counted when the
+    manifest is generated rather than guessed. Modules that need several
+    bands, an imagery group, coordinates, a config file, a display, a required
+    flag, or another parameter are marked with the reason instead of being
+    offered and failing after the wait.
+  * The module tree has three branches: Runs from here, All modules (with the
+    reason for each module that cannot be driven) and Recently run, the last
+    twelve modules kept beside the results. Labels carry GRASS's summary and
+    keywords so the tree's search finds a module by what it does as well as by
+    name, and a leading triangle marks the ones Run Module can drive.
+  * Choosing a module fills a Chosen module text under the tree with what it
+    reads and writes, so a module that cannot run explains itself before the
+    button is pressed. Run Module names the input and output the module
+    actually requires (r.watershed's elevation, not its first optional input).
+  * The modules that got a command of their own are now only those that can
+    run that way: 18 of the curated 27 remain, in the same five menus.
+  * The ribbon has a Modules group for the panel and Run Module, and Database
+    no longer carries the panel.
+  * The manifest's version is 0.5.0.
+
+ -- Yann Chemin <dr.yann.chemin@gmail.com>  Tue, 03 Nov 2026 10:00:00 +0100
+
 rustgis-grass-plugin (0.4.0) unstable; urgency=medium
 
   * Tool parameters that take a file are offered instead of being left out:

@@ -23,6 +23,7 @@ nothing here writes slots itself.
 SPDX-License-Identifier: Unlicense
 """
 
+import json
 import math
 import os
 import time
@@ -244,16 +245,72 @@ def module_args(command, values, point=None):
     return argv, notes
 
 
-def catalogue_tree(catalogue, chosen=None):
-    """Return the panel tree of every module installed, by family.
+#: The tree branches a module node can sit under. A module appears in more
+#: than one branch, so its id carries the branch and stays unique in the tree.
+NODE_PREFIXES = ("runs/", "all/", "recent/")
 
-    A tree holds 5,000 nodes and there are about 1,200 modules, so all of them
-    fit; what a manifest cannot hold is a tool or a command for each.
+#: The catalogue modes the panel's mode tree offers, and the family each keeps.
+MODE_FAMILIES = {
+    "mode/all": None,
+    "mode/imagery": "Imagery",
+}
 
-    :param catalogue: the entries ``generate_manifest.py`` wrote
-    :param chosen: the module whose family is opened
-    :return: ``(nodes, [note, ...])``
-    """
+
+def mode_family(mode):
+    """Return the family a mode tree node shows, or None for every module."""
+    return MODE_FAMILIES.get(str(mode or ""), None)
+
+
+def mode_nodes(catalogue):
+    """Return the panel tree's catalogue modes, with how many modules each holds."""
+    counts = {}
+    for entry in catalogue:
+        counts[entry["family"]] = counts.get(entry["family"], 0) + 1
+    return [
+        {"id": "mode/all", "label": "All modules", "count": len(catalogue)},
+        {
+            "id": "mode/imagery",
+            "label": "Imagery",
+            "count": counts.get("Imagery", 0),
+        },
+    ]
+
+#: How many modules the "Recently run" branch keeps.
+MAX_RECENT = 12
+
+#: The name of the file that remembers them, in the cache beside the results.
+RECENT_FILE = "recent.json"
+
+
+def module_of(node):
+    """Return the module a panel tree node names, without its branch prefix."""
+    text = str(node or "")
+    for prefix in NODE_PREFIXES:
+        if text.startswith(prefix):
+            return text[len(prefix) :]
+    return text
+
+
+def _clip(text, limit=200):
+    """Keep a tree label within the 200 characters RustGIS allows."""
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _module_label(entry):
+    """Return one tree label: whether it runs, its name, summary and keywords."""
+    mark = "▸ " if entry.get("runnable") else "  "
+    text = f"{mark}{entry['module']}"
+    if entry.get("summary"):
+        text += f" — {entry['summary']}"
+    if entry.get("keywords"):
+        text += f" — {entry['keywords']}"
+    if not entry.get("runnable") and entry.get("reason"):
+        text += f" [{entry['reason']}]"
+    return _clip(text)
+
+
+def _family_nodes(catalogue, prefix):
+    """Return family branches holding ``prefix``'s module nodes."""
     families = {}
     for entry in catalogue:
         families.setdefault(entry["family"], []).append(entry)
@@ -262,72 +319,220 @@ def catalogue_tree(catalogue, chosen=None):
         entries = sorted(families[family], key=lambda e: e["module"])
         nodes.append(
             {
-                "id": f"family/{family}",
+                "id": f"{prefix}family/{family}",
                 "label": family,
                 "count": len(entries),
                 "children": [
                     {
-                        "id": entry["module"],
-                        # A leading mark tells the modules Run Module can
-                        # drive from the ones that would need a form.
-                        "label": (
-                            f"{'▸ ' if entry.get('raster') else '  '}"
-                            f"{entry['module']}"
-                            + (
-                                f" - {entry['summary'][:90]}"
-                                if entry["summary"]
-                                else ""
-                            )
-                        ),
+                        "id": f"{prefix}{entry['module']}",
+                        "label": _module_label(entry),
                     }
                     for entry in entries
                 ],
             }
         )
+    return nodes
+
+
+def catalogue_tree(catalogue, chosen=None, recent=(), family=None):
+    """Return the panel tree of every module installed, in three branches.
+
+    "Runs from here" holds the modules Run Module can actually drive on one
+    raster, "All modules" holds every installed module with the reason the
+    others need a form, and "Recently run" is a short way back to one. A tree
+    holds 5,000 nodes; the three branches hold about 1,300.
+
+    :param catalogue: the entries ``generate_manifest.py`` wrote
+    :param chosen: the module to open the tree on, if any
+    :param recent: module names to list under "Recently run", newest first
+    :param family: keep only this GRASS family, as the panel's mode tree asks
+    :return: ``(nodes, [note, ...])``
+    """
+    if family:
+        catalogue = [entry for entry in catalogue if entry["family"] == family]
+    runs = [entry for entry in catalogue if entry.get("runnable")]
+    all_label = f"All {family.lower()} modules" if family else "All modules"
+    nodes = [
+        {
+            "id": "branch/runs",
+            "label": f"Runs from here ({len(runs)})",
+            "count": len(runs),
+            "children": _family_nodes(runs, "runs/"),
+        },
+        {
+            "id": "branch/all",
+            "label": f"{all_label} ({len(catalogue)})",
+            "count": len(catalogue),
+            "children": _family_nodes(catalogue, "all/"),
+        },
+    ]
+    by_name = {entry["module"]: entry for entry in catalogue}
+    entries = [by_name[name] for name in recent if name in by_name]
+    nodes.append(
+        {
+            "id": "branch/recent",
+            "label": f"Recently run ({len(entries)})",
+            "count": len(entries),
+            "children": [
+                {
+                    "id": f"recent/{entry['module']}",
+                    "label": _module_label(entry),
+                }
+                for entry in entries
+            ],
+        }
+    )
     notes = []
     if chosen:
-        entry = next((e for e in catalogue if e["module"] == chosen), None)
-        if entry and not entry["raster"]:
+        entry = entry_for(catalogue, chosen, quietly=True)
+        if entry and not entry.get("runnable"):
             notes.append(
-                f"{chosen} does not take a raster and write one, so Run Module "
-                "cannot drive it; a module needing a form has to be a tool."
+                f"{entry['module']} cannot be run from this panel: "
+                f"{entry.get('reason') or 'it needs a form'}. "
+                "Run Module names only one raster in and one out; every other "
+                "parameter would be GRASS's default."
             )
     return nodes, notes
 
 
-def entry_for(catalogue, module):
+def entry_for(catalogue, module, quietly=False):
     """Return one module's catalogue entry.
 
+    :param module: a module name, or a tree node id carrying a branch prefix
     :raises session.GrassError: when the tree holds no such module
     """
+    name = module_of(module)
     for entry in catalogue:
-        if entry["module"] == module:
+        if entry["module"] == name:
             return entry
+    if quietly:
+        return None
     raise session.GrassError(
-        "choose a module in the GRASS Modules tree, not a family"
-        if str(module or "").startswith("family/")
+        "choose a module in the GRASS Modules tree, not a family or a branch"
+        if name.startswith(("family/", "branch/"))
         else f"'{module}' is not a module of this GRASS installation"
     )
+
+
+def module_details(entry):
+    """Return the text under the tree saying what the chosen module needs.
+
+    This is where a module that cannot be run stops being a dead end: its
+    reason is stated rather than hidden behind a button that would fail.
+    """
+    if not entry:
+        return (
+            "Choose a module in the tree above. 'Runs from here' holds the "
+            "ones this panel can drive; 'All modules' says why the others "
+            "need a form."
+        )
+    lines = [entry["module"]]
+    if entry.get("summary"):
+        lines.append(entry["summary"])
+    if entry.get("family"):
+        lines.append(f"Family: {entry['family']}")
+    reads = entry.get("raster_in") or []
+    writes = entry.get("raster_out") or []
+    if reads:
+        lines.append("Reads: " + ", ".join(reads))
+    if writes:
+        lines.append("Writes: " + ", ".join(writes))
+    if entry.get("runnable"):
+        lines.append(
+            "Runs here with GRASS's own defaults on one band of the chosen "
+            "raster."
+            if entry.get("bands")
+            else "Runs here with GRASS's own defaults."
+        )
+    else:
+        lines.append(
+            "Not runnable from this panel: "
+            + (entry.get("reason") or "it needs a form")
+            + "."
+        )
+    if entry.get("needs"):
+        lines.append("Needs: " + ", ".join(entry["needs"]))
+    if entry.get("temporal"):
+        lines.append(
+            "This is a temporal module: it reads a space-time dataset, not one "
+            "raster."
+        )
+    if entry.get("keywords"):
+        lines.append("Keywords: " + entry["keywords"])
+    return "\n".join(lines)[:4000]
+
+
+def recent_path():
+    """Return the file that remembers the last modules run."""
+    return os.path.join(output_dir(), RECENT_FILE)
+
+
+def read_recents(limit=MAX_RECENT):
+    """Return the module names most recently run, newest first."""
+    try:
+        with open(recent_path(), encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return []
+    if not isinstance(data, list):
+        return []
+    names = []
+    for item in data:
+        if isinstance(item, str) and item and item not in names:
+            names.append(item)
+    return names[: max(0, limit)]
+
+
+def remember(module, limit=MAX_RECENT):
+    """Put a module at the front of the recently-run list and write it back.
+
+    Failing to remember must never fail a run: the result is already on the
+    map by then, and the list is a convenience.
+    """
+    names = [module] + [name for name in read_recents(limit * 2) if name != module]
+    names = names[: max(1, limit)]
+    temporary = ""
+    try:
+        path = recent_path()
+        temporary = f"{path}.{os.getpid()}.tmp"
+        with open(temporary, "w", encoding="utf-8") as f:
+            json.dump(names, f)
+        os.replace(temporary, path)
+    except OSError:
+        if temporary:
+            try:
+                os.remove(temporary)
+            except OSError:
+                pass
+    return names
 
 
 def free_module_args(entry):
     """Return the arguments for running one module on ``src`` into ``out``.
 
-    Only a module that reads a raster and writes one can be driven this way:
+    Only a module that reads one raster and writes one can be driven this way:
     the bridge names its input and its output and leaves every other parameter
-    at GRASS's own default, because a command has no form to ask with.
+    at GRASS's own default, because a command has no form to ask with. The
+    input is the one the module requires, which is not always the first it
+    lists (r.watershed lists five optional inputs after its elevation).
 
-    :raises session.GrassError: when the module takes no raster, or writes none
+    :raises session.GrassError: when the module needs more than one raster in
+        or out, an imagery group, or another required parameter with no default
     """
-    if not entry.get("raster"):
+    if not entry.get("runnable"):
+        reason = entry.get("reason") or "it needs a form"
         raise session.GrassError(
-            f"{entry['module']} does not read a raster and write one, so it "
-            "cannot be run from the tree; the modules that can are marked in it"
+            f"{entry['module']} cannot be run from this panel: {reason}. "
+            "Run Module names only one raster in and one out; the modules it "
+            "can drive are under 'Runs from here'."
         )
-    return [
-        f"{entry['raster_in'][0]}=src",
-        f"{entry['raster_out'][0]}=out",
-    ]
+    source = entry.get("raster_input") or (entry.get("raster_in") or [None])[0]
+    target = entry.get("raster_output") or (entry.get("raster_out") or [None])[0]
+    if not source or not target:
+        raise session.GrassError(
+            f"{entry['module']} has no single input and output the bridge can name"
+        )
+    return [f"{source}=src", f"{target}=out"]
 
 
 def output_dir():

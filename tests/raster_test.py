@@ -383,3 +383,191 @@ def test_a_run_on_an_overview_says_the_result_is_coarser():
 def test_a_full_resolution_export_adds_no_overview_note():
     notes = raster.source_notes({"width": 10, "height": 10}, {"path": "x.tif"})
     assert not any("overview" in n for n in notes)
+
+
+def entry(module, family="Raster", runnable=True, **fields):
+    """Return one catalogue entry as ``generate_manifest.py`` writes it."""
+    out = {
+        "module": module,
+        "family": family,
+        "summary": f"{module} summary",
+        "keywords": "keyword",
+        "raster_in": ["input"],
+        "raster_out": ["output"],
+        "raster_input": "input",
+        "raster_output": "output",
+        "runnable": runnable,
+        "reason": "" if runnable else "takes no raster",
+        "needs": [],
+        "bands": False,
+        "temporal": False,
+    }
+    out.update(fields)
+    return out
+
+
+def test_the_module_tree_branches_into_runs_all_and_recent():
+    catalogue = [
+        entry("r.slope.aspect"),
+        entry("r.watershed"),
+        entry("i.pca", "Imagery", False, reason="needs several bands"),
+    ]
+    nodes, notes = raster.catalogue_tree(
+        catalogue, "runs/r.watershed", ["i.pca", "r.slope.aspect"]
+    )
+    assert [n["id"] for n in nodes] == ["branch/runs", "branch/all", "branch/recent"]
+    runs, every, recent = nodes
+    assert runs["label"] == "Runs from here (2)"
+    assert every["label"] == "All modules (3)"
+    assert recent["label"] == "Recently run (2)"
+    assert recent["children"][0]["id"] == "recent/i.pca"
+    # The runnable modules are the two raster ones in their family branch.
+    family = runs["children"][0]
+    assert family["id"] == "runs/family/Raster"
+    assert [n["id"] for n in family["children"]] == [
+        "runs/r.slope.aspect",
+        "runs/r.watershed",
+    ]
+    # A module that cannot run is marked with the reason in the all-modules tree.
+    imagery = next(n for n in every["children"] if n["label"] == "Imagery")
+    assert "[needs several bands]" in imagery["children"][0]["label"]
+    assert notes == []
+
+
+def test_the_module_tree_can_show_one_family_only():
+    catalogue = [
+        entry("r.slope.aspect"),
+        entry("i.edge", "Imagery"),
+        entry("i.pca", "Imagery", False, reason="needs several bands"),
+    ]
+    nodes, _ = raster.catalogue_tree(catalogue, family="Imagery")
+    runs, every, recent = nodes
+    assert runs["label"] == "Runs from here (1)"
+    assert every["label"] == "All imagery modules (2)"
+    assert [n["id"] for n in runs["children"][0]["children"]] == ["runs/i.edge"]
+    assert [n["id"] for n in every["children"][0]["children"]] == [
+        "all/i.edge",
+        "all/i.pca",
+    ]
+    assert recent["children"] == []
+
+
+def test_the_mode_tree_names_the_families_and_their_sizes():
+    catalogue = [
+        entry("r.slope.aspect"),
+        entry("i.edge", "Imagery"),
+        entry("i.pca", "Imagery", False, reason="needs several bands"),
+    ]
+    assert raster.mode_nodes(catalogue) == [
+        {"id": "mode/all", "label": "All modules", "count": 3},
+        {"id": "mode/imagery", "label": "Imagery", "count": 2},
+    ]
+    assert raster.mode_family("mode/imagery") == "Imagery"
+    assert raster.mode_family("mode/all") is None
+    assert raster.mode_family("mode/no-such-mode") is None
+
+
+def test_the_recent_branch_is_present_before_anything_has_run():
+    nodes, _ = raster.catalogue_tree([entry("r.slope.aspect")])
+    assert [n["id"] for n in nodes] == ["branch/runs", "branch/all", "branch/recent"]
+    assert nodes[-1]["label"] == "Recently run (0)"
+    assert nodes[-1]["children"] == []
+
+
+def test_the_tree_says_when_the_chosen_module_cannot_run():
+    nodes, notes = raster.catalogue_tree(
+        [entry("i.pca", "Imagery", False, reason="needs several bands")],
+        "all/i.pca",
+    )
+    assert "i.pca cannot be run from this panel: needs several bands" in notes[0]
+
+
+def test_a_tree_node_names_its_module_whatever_branch_it_sits_in():
+    catalogue = [entry("r.slope.aspect")]
+    for node in (
+        "r.slope.aspect",
+        "runs/r.slope.aspect",
+        "all/r.slope.aspect",
+        "recent/r.slope.aspect",
+    ):
+        assert raster.entry_for(catalogue, node)["module"] == "r.slope.aspect"
+
+
+def test_choosing_a_family_or_a_branch_asks_for_a_module_by_name():
+    catalogue = [entry("r.slope.aspect")]
+    for node in ("branch/runs", "runs/family/Raster", "all/family/Imagery"):
+        with pytest.raises(session.GrassError) as e:
+            raster.entry_for(catalogue, node)
+        assert "choose a module" in str(e.value)
+    assert raster.entry_for(catalogue, "branch/runs", quietly=True) is None
+
+
+def test_run_module_names_the_input_and_output_the_module_requires():
+    watershed = entry(
+        "r.watershed",
+        raster_in=["elevation", "depression", "flow"],
+        raster_out=["basin", "accumulation"],
+        raster_input="elevation",
+        raster_output="basin",
+    )
+    assert raster.free_module_args(watershed) == ["elevation=src", "basin=out"]
+
+
+def test_run_module_refuses_a_module_it_cannot_drive_and_says_why():
+    with pytest.raises(session.GrassError) as e:
+        raster.free_module_args(
+            entry("i.pca", "Imagery", False, reason="needs several bands")
+        )
+    assert "needs several bands" in str(e.value)
+
+
+def test_the_details_text_states_what_a_module_needs():
+    runnable = raster.module_details(entry("r.slope.aspect"))
+    assert "r.slope.aspect" in runnable
+    assert "Reads: input" in runnable and "Writes: output" in runnable
+    assert "Runs here with GRASS's own defaults" in runnable
+
+    blocked = raster.module_details(
+        entry(
+            "i.emissivity",
+            "Imagery",
+            False,
+            reason="needs an imagery group",
+            needs=["group"],
+            temporal=True,
+        )
+    )
+    assert "Not runnable from this panel" in blocked
+    assert "needs an imagery group" in blocked
+    assert "Needs: group" in blocked
+    assert "space-time dataset" in blocked
+    assert "Choose a module" in raster.module_details(None)
+
+
+def test_recents_are_newest_first_without_repeats(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    assert raster.read_recents() == []
+    raster.remember("r.slope.aspect")
+    raster.remember("r.watershed")
+    raster.remember("r.slope.aspect")
+    assert raster.read_recents() == ["r.slope.aspect", "r.watershed"]
+
+
+def test_recents_are_capped_and_a_broken_file_is_ignored(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    for number in range(raster.MAX_RECENT + 3):
+        raster.remember(f"r.example{number}")
+    assert len(raster.read_recents()) == raster.MAX_RECENT
+    assert raster.read_recents()[0] == f"r.example{raster.MAX_RECENT + 2}"
+    with open(raster.recent_path(), "w") as f:
+        f.write("{not json")
+    assert raster.read_recents() == []
+
+
+def test_a_cache_that_cannot_be_written_never_fails_a_run(monkeypatch):
+    def refuse():
+        raise PermissionError("read-only cache")
+
+    monkeypatch.setattr(raster, "output_dir", refuse)
+    assert raster.read_recents() == []
+    assert raster.remember("r.slope.aspect") == ["r.slope.aspect"]

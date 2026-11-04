@@ -13,8 +13,9 @@ Vector groups, above the World Atlas sample map](plugin_grassgis_030.png)
 
 Above is the plugin's own **GRASS** ribbon tab: **Database** opens the GRASS database panel and
 adds a map from it, **Region** sets the computational region from the map view or a layer,
-**Raster** runs slope, aspect and viewshed or any module the panel can drive, and **Vector**
-holds the generated tools, grouped by what they do.
+**Raster** runs slope, aspect and viewshed or the common raster modules in menus, **Imagery**
+does the same for the imagery modules, **Vector** holds the generated tools, grouped by what
+they do, and **Modules** opens the panel and its **Run Module**.
 
 GRASS is not bundled, linked or copied here. Each run spawns the `grass` launcher already
 installed on the machine, and every tool's form is read from that installation at build time with
@@ -24,30 +25,36 @@ Apache-2.0 GIS this way.
 
 ## What it offers
 
-Everything the installation has. On this machine that is **1,179 modules**, addons included, of
-which **1,174** could describe themselves:
+Everything the installation has. On this machine that is **1,180 modules**, addons included, of
+which **1,175** could describe themselves:
 
 | Family | Modules | Family | Modules |
 |---|---|---|---|
-| Raster (`r.*`) | 454 | General (`g.*`) | 55 |
+| Raster (`r.*`) | 455 | General (`g.*`) | 55 |
 | Vector (`v.*`) | 223 | Display (`d.*`) | 49 |
 | Imagery (`i.*`) | 176 | 3D Raster (`r3.*`) | 35 |
 | Temporal (`t.*`) | 74 | Database (`db.*`) | 22 |
 | Planetary (`p.*`) | 67 | Miscellaneous (`m.*`) | 14 |
+| Tests (`test.*`) | 4 | PostScript (`ps.*`) | 1 |
 
 They are reached three ways, because the ABI gives three and each has a ceiling:
 
 | Route | Covers | Ceiling |
 |---|---|---|
 | **Tools**, with a generated form in the Tools pane | 64 vector modules | a manifest holds **64 tools**, and a tool takes no raster, so only vector modules qualify: 128 do, half of them fit |
-| **Commands** on the ribbon | Slope, Aspect, Viewshed, **27 common raster modules** in menus by theme, the region and the database | a manifest holds **256 commands**, and a command opens no dialog, so each needs the panel to be told anything |
-| **Run Module**, from the panel's tree | **all 1,174**, of which the **358** that read a raster and write one can be run | a command has no form, so only the input and the output are named; everything else is GRASS's default |
+| **Commands** on the ribbon | Slope, Aspect, Viewshed, **18 common raster modules** and **7 imagery modules** in menus by theme, the region and the database | a manifest holds up to **256 commands**, and a command opens no dialog, so each needs the panel to be told anything |
+| **Run Module**, from the panel's tree | **all 1,175**, of which the **88** that read one raster and write one, with no second required raster, band set or display and every other required parameter defaulted, can be run | a command has no form, so only the input and the output are named; everything else is GRASS's default |
 
-The tree is searchable and marks with **▸** the modules Run Module can drive. The 64 modules that
-could have been tools but did not fit are listed in `modules.json` under `toolsLeftOut`, as are
-the five that could not be read at all.
+The tree is searchable and has three branches: **Runs from here** (the 88), **All modules**
+(every module, with the reason the others need a form) and **Recently run**. A **Catalogue**
+tree above it keeps either all modules or only the imagery (`i.*`) ones, and the **Imagery
+Modules** ribbon button turns that filter on. A module Run Module can drive is marked with
+**▸**; the others carry their reason, such as *needs several bands* or *needs an imagery
+group*, and choosing one says what it reads and writes in the **Chosen module** text before
+Run Module is pressed. The 64 modules that could have been tools but did not fit are listed in
+`modules.json` under `toolsLeftOut`, as are the five that could not be read at all.
 
-So "every GRASS module" is true for *reaching* them and false for *forms*: 64 of 1,174 get one.
+So "every GRASS module" is true for *reaching* them and false for *forms*: 64 of 1,175 get one.
 That gap is the ABI's, not GRASS's, and it is what a crate in the RustGIS tree would close.
 
 ### Its own tab
@@ -59,8 +66,10 @@ against a documented limit of 16:
 |---|---|
 | Database | the panel, GRASS Database, Add Map, Browse Mapset |
 | Region | Region = Map View, Region = Whole Layer, Refresh Rasters |
-| Raster | Slope, Aspect, Viewshed, Run Module, and menus of raster modules: Terrain, Hydrology, Filters, Surfaces, Sun |
+| Raster | Slope, Aspect, Viewshed, and menus of raster modules: Terrain, Hydrology, Filters, Surfaces, Sun |
+| Imagery | the panel, Imagery Modules, and menus of imagery modules: Enhance, Preprocess, Detect, Geometry |
 | Vector | the 64 tools, in menus by GRASS keyword (Proximity, Geometry, Network, LIDAR…) |
+| Modules | the panel, All Modules, and Run Module |
 
 ### What of RustGIS it uses
 
@@ -71,9 +80,9 @@ Everything the plugin ABI offers that a GRASS bridge can make use of, as of Rust
 | `tools` with a generated form | 64 vector modules, with their GRASS parameters, flags and choices |
 | `file` tool parameters | the rules, node and control-point files of `v.segment`, `v.net`, `v.extract`, `v.rectify`, `v.lrs.segment` |
 | `tables` beside `layers` in a tool's result | rows a module writes without geometry |
-| `commands` (256 of them) | the shaped slope/aspect/viewshed runs, 27 common raster modules, the region and the database |
-| a `tab` of its own, with compact columns and nested menus | the GRASS tab: Database, Region, Raster (with menus by theme), Vector (menus by GRASS keyword) |
-| a `panel`, with `tree` widgets that search | the GRASS database, the map's rasters, the band, and all 1,174 modules |
+| `commands` (up to 256) | the shaped slope/aspect/viewshed runs, 18 common raster modules, 7 imagery modules, the region and the database |
+| a `tab` of its own, with compact columns and nested menus | the GRASS tab: Database, Region, Raster and Imagery (with menus by theme), Vector (menus by GRASS keyword), Modules |
+| a `panel`, with `tree` widgets that search | the GRASS database, the map's rasters, the band, the catalogue mode, the module tree with its three branches, and the chosen module's details |
 | `raster.info` | refusing a raster with no coordinate system, describing the source, and sizing the band slider |
 | `share.exportRaster`'s answer | saying when a run was made on a downsampled overview |
 | `gp.env` | the computational region |
@@ -91,7 +100,7 @@ parameters per tool.
 From the package, on Debian or Ubuntu:
 
 ```sh
-sudo apt install ./dist/rustgis-grass-plugin_0.4.0_all.deb
+sudo apt install ./dist/rustgis-grass-plugin_0.5.0_all.deb
 rustgis-grass-setup          # once per user; again after upgrading GRASS
 ```
 
@@ -118,9 +127,9 @@ for: they are what lets the plugin have RustGIS write and read the GeoTIFFs it w
 vector tools need neither.
 
 In the desktop app: **Plugin Manager › Settings › Add Plugin Folder…**. The tools then appear in
-the Tools pane under **Plugins ›** and as a group on the **Plugins** ribbon tab, where the
-**GRASS Raster** button opens the panel the raster commands are run from. A process plugin is **not sandboxed**: it runs programs as
-you do, which is how it can reach GRASS at all.
+the Tools pane under **Plugins ›** and as a group on the **Plugins** ribbon tab; the plugin's own
+**GRASS** tab carries the panel and the raster commands. A process plugin is **not sandboxed**:
+it runs programs as you do, which is how it can reach GRASS at all.
 
 `plugin.json` and `modules.json` are **not committed**: they carry GRASS's own parameter labels,
 which are part of its GPL documentation. They are generated from your installation by
@@ -160,7 +169,8 @@ and a tool "can log, but makes no host requests". A plugin *command* may call an
 command its permissions allow, which is enough to carry a raster in and out:
 
 1. `host.layers` lists the map's layers; the panel's tree chooses one of the rasters (without a
-   choice, the active one, or the only one).
+   choice, the active one, or the only one), and the module tree chooses the module (without a
+   choice, `run-module` says which modules it can drive).
 2. `raster.info` describes it before it leaves: its coordinate system, size, cell size, value
    type and bands. A layer RustGIS read **without a coordinate system is refused** here, because
    `grass -c` on such a file makes a project with no projection and every distance the module
@@ -260,7 +270,7 @@ what RustGIS would not take rather than offering something that cannot work: a r
 a name with a digit in it (`v.gsflow.segments` has `width1`), a name the module declares twice
 (the same module declares four of them twice over), and a file the module writes although it
 declares it as one it reads (`v.rectify`'s `rmsfile`), since a file picker cannot name a file
-that does not exist yet. Reading all 1,179 forms takes about three and
+that does not exist yet. Reading all 1,180 forms takes about three and
 a half minutes, 24 at a time.
 
 ## Watch out
@@ -270,14 +280,15 @@ a half minutes, 24 at a time.
   module would quietly write a single cell. Step 3 above exists because of that.
 - A run costs about ten seconds of project creation, import and export even for a dozen points,
   because each module call builds its own database. A session-scoped mapset would amortise it.
-- Several input maps and 3D (`r3.*`) data are not offered; a raster reaches a command, never a
-  tool.
+- Several input maps, 3D (`r3.*`) data, imagery groups and the modules that take a base name and
+  read the bands beside it are not run by Run Module; a raster reaches a command, never a tool.
 - A raster that RustGIS holds as an overview is exported as that overview, and a raster that is
   not a colour one is exported one band at a time. Both are reported in the run's messages, so
   read them before taking a result for the whole file at full resolution.
 - A tree widget only keeps a value that was among the nodes the plugin last sent, so a script
   passing `{"panel": {"raster": "3"}}` must run `raster-state` first, as the panel does when it
-  opens.
+  opens. The module tree's ids carry a branch prefix (`runs/`, `all/`, `recent/`), which
+  `run-module` strips; a family or branch node is refused with a request to choose a module.
 - `v.generalize` has one parameter too many for a plugin tool's limit of 32; the generator keeps
   the required ones and says which it dropped.
 

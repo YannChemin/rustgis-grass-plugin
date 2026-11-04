@@ -59,16 +59,28 @@ work is done by commands instead: they ask RustGIS to export the layer, run the 
 on the file and add the result back.
 
 - The common modules have a command each: `plugin:grass-vector/r-slope-aspect`,
-  `r-watershed`, `r-neighbors`, `r-sun`, `r-fillnulls`, and the rest of the GRASS tab's
-  Raster menus. Three shaped commands take parameters from the panel instead of
-  GRASS's defaults: `raster-slope` (degrees or percent), `raster-aspect` and
-  `raster-viewshed` (height, range, earth curvature, from the centre of the map).
-- Any other installed module is run by choosing it in the panel's **Every GRASS module
-  installed** tree and running `run-module`. The tree marks with a leading triangle
-  the modules that can be driven this way.
+  `r-watershed`, `r-neighbors`, `r-sunmask`, `r-fillnulls`, and the rest of the GRASS
+  tab's Raster menus. The Imagery group adds the imagery ones the panel can drive
+  (`i-edge`, `i-zc`, `i-destripe`, `i-sar-speckle`, `i-water`, `i-emissivity`,
+  `i-rotate`) under Enhance, Preprocess, Detect and Geometry. Three shaped commands
+  take parameters from the panel instead of GRASS's defaults: `raster-slope` (degrees
+  or percent), `raster-aspect` and `raster-viewshed` (height, range, earth curvature,
+  from the centre of the map).
+- Any other installed module is run by choosing it in the panel's module tree and
+  running `run-module`. The tree has three branches: **Runs from here** (the modules
+  Run Module can drive), **All modules** (every installed module, with the reason the
+  others cannot be driven) and **Recently run**. The panel's **Catalogue** tree keeps
+  all modules or only the imagery ones; `imagery-state` turns that filter on and
+  `all-state` turns it off. A leading triangle **▸** marks a module Run Module can
+  drive; the others carry their reason, such as *needs several bands*, *needs an
+  imagery group* or *needs a display*, so tell the user what the module needs instead
+  of offering a run that would fail.
 - A command has no form, so a curated or tree-driven module runs with **GRASS's own
   defaults** for everything but its input and output. Tell the user that, rather than
   implying the parameters were chosen.
+- The tree's node ids carry a branch prefix (`runs/`, `all/`, `recent/`);
+  `run-module` strips it. A family or branch node is refused with a request to choose
+  a module.
 - The panel's values go with any run, so a script sets them:
 
 ```
@@ -108,6 +120,7 @@ size. The run messages always state the region that was used; quote it.
   chosen there (a raster as a GeoTIFF, a vector as a GeoPackage, both carrying their
   coordinate system) and adds it to the project.
 - Results are kept in `~/.cache/rustgis-grass-plugin/`, and the messages give the path.
+  The last twelve modules run there are listed under the tree's **Recently run** branch.
 
 ## When something fails
 

@@ -128,6 +128,17 @@ RASTER_COMMANDS = {
     "Sun": ["r.sun", "r.sunmask", "r.horizon", "r.sunhours"],
 }
 
+#: Imagery modules that get a command of their own, by the ribbon menu they go
+#: in. These are the i.* modules the panel can actually drive from one raster;
+#: the rest need an imagery group or several bands and keep their reason in the
+#: panel's tree.
+IMAGERY_COMMANDS = {
+    "Enhance": ["i.edge", "i.zc"],
+    "Preprocess": ["i.destripe", "i.sar.speckle"],
+    "Detect": ["i.water", "i.emissivity"],
+    "Geometry": ["i.rotate"],
+}
+
 
 def installed_modules(grass):
     """Return every module name the installation offers, sorted.
@@ -238,6 +249,22 @@ COMMANDS = [
         "params": "{} (the panel's trees choose the module and the layer)",
     },
     {
+        "id": "imagery-state",
+        "label": "Imagery\nModules",
+        "help": "Open the GRASS GIS panel with its module tree filtered to the "
+        "imagery (i.*) modules, and list the ones Run Module can drive.",
+        "icon": "stats",
+        "params": "{} (the panel's mode tree shows the same filter)",
+    },
+    {
+        "id": "all-state",
+        "label": "All\nModules",
+        "help": "Open the GRASS GIS panel with its module tree showing every "
+        "installed module again.",
+        "icon": "stats",
+        "params": "{} (the panel's mode tree shows the same filter)",
+    },
+    {
         "id": "data-folder",
         "label": "GRASS\nDatabase",
         "help": "Put the GRASS database GRASS itself uses into the browser, "
@@ -290,8 +317,8 @@ COMMANDS = [
 PANEL = {
     "title": "GRASS GIS",
     "icon": "stats",
-    "help": "Reach the GRASS database, and run GRASS raster modules on a "
-    "raster layer of the map.",
+    "help": "Reach the GRASS database, find a module, and run the ones that "
+    "need only a raster in and one out on a raster layer of the map.",
     "state": "raster-state",
     "items": [
         {"kind": "text", "id": "gisdbase", "label": "GRASS database"},
@@ -387,11 +414,33 @@ PANEL = {
         {"kind": "button", "command": "raster-viewshed"},
         {
             "kind": "tree",
+            "id": "mode",
+            "label": "Catalogue",
+            "help": "Which modules the tree below lists: every installed module, "
+            "or the imagery (i.*) modules only.",
+            "command": "raster-state",
+        },
+        {
+            "kind": "tree",
             "id": "modules",
-            "label": "Every GRASS module installed",
-            "help": "Searchable. Choosing a raster module and pressing Run "
-            "Module runs it on the chosen raster layer.",
+            "label": "GRASS modules (runs here first)",
+            "help": "Searchable by module name, summary and GRASS keywords. "
+            "'Runs from here' lists the modules Run Module can drive on the "
+            "chosen raster; 'All modules' lists every installed one with the "
+            "reason the others need a form; 'Recently run' returns to one. The "
+            "Catalogue tree above keeps all modules or only the imagery ones.",
             "search": True,
+            # Choosing a module refreshes the details under this tree (and the
+            # chosen layer, which costs one raster.info) before Run Module is
+            # pressed, so a module that cannot run says why there and then.
+            "command": "raster-state",
+        },
+        {
+            "kind": "text",
+            "id": "details",
+            "label": "Chosen module",
+            "help": "What the module reads and writes, and whether Run Module "
+            "can drive it from this panel.",
         },
         {"kind": "button", "command": "run-module"},
         {"kind": "text", "id": "status", "label": "Last run"},
@@ -404,19 +453,22 @@ def raster_command_id(module):
     return module.replace(".", "-")
 
 
-def raster_commands(catalogue):
+def raster_commands(catalogue, planned=None):
     """Return a command for each curated raster module the installation has.
 
     :param catalogue: the catalogue entries, which say what each module reads
         and writes
+    :param planned: the menus to fill, :data:`RASTER_COMMANDS` by default
     :return: ``([command, ...], {command id: module}, {menu: [command id]})``
     """
     entries = {entry["module"]: entry for entry in catalogue}
     commands, modules, menus = [], {}, {}
-    for menu, wanted in RASTER_COMMANDS.items():
+    for menu, wanted in (RASTER_COMMANDS if planned is None else planned).items():
         for module in wanted:
             entry = entries.get(module)
-            if not entry or not entry.get("raster"):
+            # A command has no form, so only a module Run Module can actually
+            # drive is offered; the rest keep their reason in the panel's tree.
+            if not entry or not entry.get("runnable"):
                 continue
             cid = raster_command_id(module)
             commands.append(
@@ -448,17 +500,25 @@ FRENCH = {
     "Database": "Base de donnees",
     "Region": "Region",
     "Raster": "Raster",
+    "Imagery": "Imagerie",
     "Vector": "Vecteur",
+    "Modules": "Modules",
     "Terrain": "Relief",
     "Hydrology": "Hydrologie",
     "Filters": "Filtres",
     "Surfaces": "Surfaces",
     "Sun": "Soleil",
+    "Enhance": "Rehaussement",
+    "Preprocess": "Pretraitement",
+    "Detect": "Detection",
+    "Geometry": "Geometrie",
     "GRASS GIS": "GRASS GIS",
     "Slope": "Pente",
     "Aspect": "Exposition",
     "Viewshed": "Bassin de visibilite",
     "Run\nModule": "Lancer le\nmodule",
+    "Imagery\nModules": "Modules\nd'imagerie",
+    "All\nModules": "Tous les\nmodules",
     "GRASS\nDatabase": "Base GRASS",
     "Add\nMap": "Ajouter\nla carte",
     "Browse\nMapset": "Parcourir\nle jeu",
@@ -480,7 +540,10 @@ FRENCH = {
     "Viewshed follows the curvature of the earth": (
         "La visibilite tient compte de la courbure de la Terre"
     ),
-    "Every GRASS module installed": "Tous les modules GRASS installes",
+    "All modules": "Tous les modules",
+    "GRASS modules (runs here first)": "Modules GRASS (ceux qui tournent d'abord)",
+    "Chosen module": "Module choisi",
+    "Catalogue": "Catalogue",
     "Last run": "Derniere execution",
 }
 
@@ -540,9 +603,20 @@ def build():
                 # than by running the module again when the panel opens.
                 "raster": bool(described["raster_in"] and described["raster_out"]),
                 "vector": bool(described["vector_in"] and described["vector_out"]),
-                # The first of each, which is what Run Module wires up.
-                "raster_in": described["raster_in"][:1],
-                "raster_out": described["raster_out"][:1],
+                # Every raster port, and the one Run Module names. A module
+                # with several optional inputs can still run; the one it must
+                # have is not always the first GRASS lists.
+                "raster_in": described["raster_in"],
+                "raster_out": described["raster_out"],
+                "raster_input": described["raster_input"],
+                "raster_output": described["raster_output"],
+                # Whether one raster in and one out is all it needs, so the
+                # panel can offer a "runs here" list instead of a promise.
+                "runnable": described["runnable"],
+                "reason": described["reason"],
+                "needs": described["needs"],
+                "bands": described["bands"],
+                "temporal": described["temporal"],
             }
         )
         if described["vector_in"] and described["vector_out"]:
@@ -590,16 +664,24 @@ def build():
         notes[tool_id(module)] = form["skipped"]
 
     rasters = sum(1 for entry in catalogue if entry["raster"])
+    runnable = sum(1 for entry in catalogue if entry["runnable"])
     print(
         f"  {len(tools)} vector modules became tools, {len(left_out)} more could "
-        f"have; {rasters} raster modules run from the panel; "
-        f"{len(catalogue)} modules in the tree"
+        f"have; {runnable} of {rasters} raster modules run from the panel with "
+        f"defaults; {len(catalogue)} modules in the tree"
     )
 
     raster_cmds, raster_modules, raster_menus = raster_commands(catalogue)
+    imagery_cmds, imagery_modules, imagery_menus = raster_commands(
+        catalogue, IMAGERY_COMMANDS
+    )
     print(
         f"  {len(raster_cmds)} raster modules got a command of their own, in "
         f"{len(raster_menus)} ribbon menus"
+    )
+    print(
+        f"  {len(imagery_cmds)} imagery modules got a command of their own, in "
+        f"{len(imagery_menus)} ribbon menus"
     )
     files = sum(
         1 for tool in tools for param in tool["params"] if param["kind"] == "file"
@@ -609,7 +691,7 @@ def build():
     manifest = {
         "id": "grass-vector",
         "name": "GRASS GIS Tools",
-        "version": "0.4.0",
+        "version": "0.5.0",
         "description": (
             "Runs GRASS GIS modules: vector modules as geoprocessing tools, and "
             "every installed module from a panel and a tab of its own. GRASS "
@@ -628,16 +710,16 @@ def build():
         # files they work on, and a tool's `file` parameter is handed to the
         # plugin, which needs both.
         "permissions": ["edit", "files"],
-        "commands": COMMANDS + raster_cmds,
+        "commands": COMMANDS + raster_cmds + imagery_cmds,
         "tools": tools,
-        "tab": tab(tools, raster_menus),
+        "tab": tab(tools, raster_menus, imagery_menus),
         "panel": PANEL,
         "skills": list(SKILLS),
         "i18n": i18n(),
     }
     catalogue_out = {
         "modules": modules,
-        "rasterCommands": raster_modules,
+        "rasterCommands": {**raster_modules, **imagery_modules},
         "skipped": notes,
         "catalogue": catalogue,
         "unreadable": sorted(set(failed)),
@@ -649,12 +731,12 @@ def build():
     return manifest, catalogue_out
 
 
-def tab(tools, raster_menus=None):
+def tab(tools, raster_menus=None, imagery_menus=None):
     """Return the plugin's own ribbon tab.
 
     A tab holds 8 groups and a small group 48 controls, so the vector tools and
-    the curated raster modules go into menus: one per toolbox, which is one per
-    GRASS keyword, and one per raster theme.
+    the curated raster and imagery modules go into menus: one per toolbox,
+    which is one per GRASS keyword, and one per theme.
     """
     boxes = {}
     for tool in tools:
@@ -675,7 +757,7 @@ def tab(tools, raster_menus=None):
             {
                 "label": "Database",
                 "layout": "small",
-                "items": ["panel", "data-folder", "data-add", "data-browse"],
+                "items": ["data-folder", "data-add", "data-browse"],
             },
             {
                 "label": "Region",
@@ -689,14 +771,30 @@ def tab(tools, raster_menus=None):
                     "raster-slope",
                     "raster-aspect",
                     "raster-viewshed",
-                    "run-module",
                     *(
                         {"menu": menu, "items": items[:32]}
                         for menu, items in sorted((raster_menus or {}).items())
                     ),
                 ],
             },
+            {
+                "label": "Imagery",
+                "layout": "small",
+                "items": [
+                    "panel",
+                    "imagery-state",
+                    *(
+                        {"menu": menu, "items": items[:32]}
+                        for menu, items in sorted((imagery_menus or {}).items())
+                    ),
+                ],
+            },
             {"label": "Vector", "layout": "small", "items": menus[:48]},
+            {
+                "label": "Modules",
+                "layout": "small",
+                "items": ["panel", "all-state", "run-module"],
+            },
         ],
     }
 

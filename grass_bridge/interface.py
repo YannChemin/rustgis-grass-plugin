@@ -22,6 +22,10 @@ PLUMBING_FLAGS = frozenset({"overwrite", "verbose", "quiet", "help", "ui"})
 #: Parameters naming where data comes from or goes, which the bridge supplies.
 PLUMBING_PARAMS = frozenset({"input", "output", "layer"})
 
+#: ``gisprompt`` elements that name a space-time dataset: what GRASS's
+#: temporal modules read instead of one raster.
+TEMPORAL_ELEMENTS = frozenset({"stds", "strds", "stvds", "str3ds", "stdsp"})
+
 #: A plugin manifest allows this many parameters per tool.
 MAX_PARAMS = 32
 
@@ -137,14 +141,145 @@ def ports(task):
     return out
 
 
+def _prompt(gisprompt):
+    """Return a ``<gisprompt>``'s element, whichever attribute names it."""
+    if gisprompt is None:
+        return ""
+    return gisprompt.get("prompt") or gisprompt.get("element") or ""
+
+
+def _needs_text(names):
+    """Return a short, human reason for required parameters with no default."""
+    if len(names) == 1:
+        name = names[0]
+        if name in ("group", "input_group", "input_group_to_decompose"):
+            return "needs an imagery group"
+        if name in ("config", "parameters", "rules"):
+            return "needs a config file"
+        if name in ("coordinates", "coordinate"):
+            return "needs coordinates"
+        return f"needs {name}"
+    shown = ", ".join(names[:3])
+    return f"needs {shown}" + ("..." if len(names) > 3 else "")
+
+
+def _runnability(task):
+    """Return whether the bridge can drive a module from one raster.
+
+    Run Module names one input and one output and leaves everything else at
+    GRASS's own default. So a module is runnable this way only when it has one
+    required raster input (not a group of bands), at least one output, no
+    second required raster, and every other required parameter has a default.
+
+    The answer is deliberately conservative: a module that reads several
+    rasters or needs an imagery group is marked with the reason instead of
+    being offered and failing after the user waits for it.
+    """
+    params = task.findall("parameter")
+    raster_ins, raster_outs, required = [], [], []
+    temporal = False
+    for param in params:
+        gisprompt = param.find("gisprompt")
+        element = _prompt(gisprompt)
+        if element in TEMPORAL_ELEMENTS:
+            temporal = True
+        if element in ("raster", "cell"):
+            is_output = gisprompt.get("age") == "new"
+            (raster_outs if is_output else raster_ins).append(param)
+        if param.get("required") == "yes":
+            required.append(param)
+    required_flags = [
+        flag.get("name") or "?"
+        for flag in task.findall("flag")
+        if flag.get("required") == "yes"
+    ]
+
+    out = {
+        "runnable": False,
+        "reason": "",
+        "needs": [],
+        "raster_input": None,
+        "raster_output": None,
+        "bands": False,
+        "temporal": temporal,
+    }
+    if not raster_ins:
+        out["reason"] = "takes no raster"
+        return out
+    if not raster_outs:
+        out["reason"] = "writes no raster"
+        return out
+
+    required_ins = [p for p in raster_ins if p.get("required") == "yes"]
+    if not required_ins:
+        out["reason"] = "needs an input chosen for it"
+        return out
+    if len(required_ins) > 1:
+        out["reason"] = f"needs {len(required_ins)} raster inputs"
+        return out
+    chosen_in = required_ins[0]
+    out["raster_input"] = chosen_in.get("name")
+
+    required_outs = [p for p in raster_outs if p.get("required") == "yes"]
+    chosen_out = required_outs[0] if required_outs else raster_outs[0]
+    out["raster_output"] = chosen_out.get("name")
+    if len(required_outs) > 1:
+        out["reason"] = f"writes {len(required_outs)} rasters"
+        return out
+    if "basename" in _about(chosen_out).lower():
+        out["reason"] = "writes several rasters"
+        return out
+
+    if chosen_in.get("multiple") == "yes":
+        out["bands"] = True
+        out["reason"] = "needs several bands"
+        return out
+    # i.landsat.toar and i.landsat.acca take a *base name* and read B.1, B.2,
+    # ... beside it; naming one raster there would fail once GRASS looked for
+    # the band that follows.
+    if "base name" in _about(chosen_in).lower():
+        out["bands"] = True
+        out["reason"] = "needs several bands"
+        return out
+
+    if required_flags:
+        out["reason"] = f"needs flag -{required_flags[0]}"
+        return out
+
+    needs = []
+    for param in required:
+        if param is chosen_in or param is chosen_out:
+            continue
+        name = param.get("name") or ""
+        if _text(param.find("default")):
+            continue
+        needs.append(name)
+    if needs:
+        out["needs"] = needs
+        out["reason"] = _needs_text(needs)
+        return out
+
+    # d.* modules open or drive a display, and Run Module has no display to
+    # give them: d.rast.edit would wait for an editor that never appears.
+    if family_of(task.get("name") or "") == "Display":
+        out["reason"] = "needs a display"
+        return out
+
+    out["runnable"] = True
+    return out
+
+
 def describe(xml_text):
     """Describe one module for the catalogue the panel's tree is built from.
 
     This is what tells a raster module from a vector one without running it
-    again, and carries the one line GRASS gives for each.
+    again, and carries the one line GRASS gives for each. It also works out
+    whether Run Module can drive the module, so the panel can offer the ones
+    that will actually run and say why the others will not.
 
     :param xml_text: the module's ``--interface-description`` output
-    :return: ``{"module", "summary", "keywords", "family", ports...}``
+    :return: ``{"module", "summary", "keywords", "family", ports...,
+        "runnable", "reason", ...}``
     :raises ValueError: when the document is not a task description
     """
     try:
@@ -161,6 +296,7 @@ def describe(xml_text):
         "family": family_of(name),
     }
     out.update(ports(task))
+    out.update(_runnability(task))
     return out
 
 

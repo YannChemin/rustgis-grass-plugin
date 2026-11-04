@@ -402,3 +402,160 @@ def test_a_file_named_with_no_contents_behind_it_is_an_error():
     declared = [{"name": "rules", "kind": "file"}]
     with pytest.raises(session.GrassError, match="no contents"):
         main.file_params(declared, {"params": {"rules": "r.txt"}, "files": {}}, None)
+
+
+def raster_task(extra="", name="r.example"):
+    """Return a module description with one required raster input and output."""
+    return f"""<task name="{name}">
+  <label>Does something to a raster.</label>
+  <parameter name="elevation" type="string" required="yes" multiple="no">
+    <description>Input elevation</description>
+    <gisprompt age="old" element="cell" prompt="raster" />
+  </parameter>
+  <parameter name="slope" type="string" required="yes" multiple="no">
+    <description>Output slope</description>
+    <gisprompt age="new" element="cell" prompt="raster" />
+  </parameter>
+  {extra}
+</task>"""
+
+
+def test_a_module_reading_and_writing_one_raster_runs_here():
+    entry = interface.describe(raster_task())
+    assert entry["runnable"] is True
+    assert entry["reason"] == ""
+    assert entry["raster_input"] == "elevation"
+    assert entry["raster_output"] == "slope"
+    assert entry["raster_in"] == ["elevation"]
+    assert entry["raster_out"] == ["slope"]
+
+
+def test_optional_rasters_do_not_stop_a_module_running():
+    extra = """<parameter name="depression" type="string" required="no">
+      <description>Optional second input</description>
+      <gisprompt age="old" element="cell" prompt="raster" />
+    </parameter>
+    <parameter name="aspect" type="string" required="no">
+      <description>Optional second output</description>
+      <gisprompt age="new" element="cell" prompt="raster" />
+    </parameter>"""
+    entry = interface.describe(raster_task(extra))
+    assert entry["runnable"] is True
+    assert entry["raster_in"] == ["elevation", "depression"]
+    assert entry["raster_out"] == ["slope", "aspect"]
+    assert (entry["raster_input"], entry["raster_output"]) == ("elevation", "slope")
+
+
+def test_a_module_needing_a_group_says_so_instead_of_offering_a_button():
+    extra = """<parameter name="group" type="string" required="yes">
+      <description>Imagery group</description>
+      <gisprompt age="old" element="group" prompt="group" />
+    </parameter>"""
+    entry = interface.describe(raster_task(extra, name="i.example"))
+    assert entry["runnable"] is False
+    assert entry["reason"] == "needs an imagery group"
+    assert entry["needs"] == ["group"]
+
+
+def test_a_module_wanting_several_bands_is_marked_not_run():
+    task = raster_task().replace(
+        'name="elevation" type="string" required="yes" multiple="no"',
+        'name="elevation" type="string" required="yes" multiple="yes"',
+    )
+    entry = interface.describe(task)
+    assert entry["runnable"] is False
+    assert entry["bands"] is True
+    assert entry["reason"] == "needs several bands"
+
+
+def test_a_required_flag_or_parameter_is_a_reason_not_a_silent_failure():
+    flag = interface.describe(raster_task('<flag name="c" required="yes" />'))
+    assert flag["reason"] == "needs flag -c"
+    param = interface.describe(
+        raster_task(
+            '<parameter name="threshold" type="float" required="yes">'
+            "<description>Cut-off</description></parameter>"
+        )
+    )
+    assert param["reason"] == "needs threshold"
+    assert param["needs"] == ["threshold"]
+
+
+def test_temporal_modules_are_recognised_by_their_dataset_prompt():
+    extra = """<parameter name="strds" type="string" required="no">
+      <description>Space-time raster dataset</description>
+      <gisprompt age="old" element="strds" prompt="strds" />
+    </parameter>"""
+    entry = interface.describe(raster_task(extra, name="t.example"))
+    assert entry["temporal"] is True
+
+
+def test_a_required_3d_raster_named_input_is_not_mistaken_for_plumbing():
+    extra = """<parameter name="input" type="string" required="yes">
+      <description>3D raster to slice</description>
+      <gisprompt age="old" element="grid3" prompt="3d-raster" />
+    </parameter>"""
+    entry = interface.describe(raster_task(extra, name="r3.example"))
+    assert entry["runnable"] is False
+    assert entry["reason"] == "needs input"
+    assert entry["needs"] == ["input"]
+
+
+def test_a_module_taking_a_base_name_reads_several_bands():
+    task = raster_task(name="i.landsat.toar").replace(
+        "<description>Input elevation</description>",
+        "<label>Base name of input raster bands</label>",
+    )
+    entry = interface.describe(task)
+    assert entry["runnable"] is False
+    assert entry["bands"] is True
+    assert entry["reason"] == "needs several bands"
+
+
+def test_a_display_module_is_not_offered_without_a_display():
+    entry = interface.describe(raster_task(name="d.example"))
+    assert entry["runnable"] is False
+    assert entry["reason"] == "needs a display"
+
+
+def test_the_panel_keeps_an_imagery_mode_and_filters_the_module_tree(monkeypatch):
+    import main
+
+    catalogue = [
+        {
+            "module": "i.edge",
+            "family": "Imagery",
+            "summary": "",
+            "keywords": "",
+            "raster_in": ["input"],
+            "raster_out": ["output"],
+            "raster_input": "input",
+            "raster_output": "output",
+            "runnable": True,
+            "reason": "",
+            "needs": [],
+            "bands": False,
+            "temporal": False,
+        }
+    ]
+    monkeypatch.setattr(main, "load_catalogue", lambda: {"catalogue": catalogue})
+    monkeypatch.setattr(main.session, "version", lambda *a, **k: "8.6")
+    monkeypatch.setattr(main.raster, "read_recents", lambda *a, **k: [])
+
+    def fake_call(op, params=None):
+        if op == "host.layers":
+            return [{"id": 1, "name": "scene", "raster": True, "active": True}]
+        return {}
+
+    monkeypatch.setattr(main, "call", fake_call)
+    state = main.panel_state({"panel": {"values": {"raster": "1"}}}, "mode/imagery")
+    assert state["panel"]["values"]["mode"] == "mode/imagery"
+    assert state["panel"]["items"]["mode"]["nodes"] == [
+        {"id": "mode/all", "label": "All modules", "count": 1},
+        {"id": "mode/imagery", "label": "Imagery", "count": 1},
+    ]
+    assert (
+        state["panel"]["items"]["modules"]["nodes"][1]["label"]
+        == "All imagery modules (1)"
+    )
+    assert "Showing imagery modules only." in state["panel"]["items"]["status"]["text"]
