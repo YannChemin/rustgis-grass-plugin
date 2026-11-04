@@ -253,6 +253,7 @@ NODE_PREFIXES = ("runs/", "all/", "recent/")
 MODE_FAMILIES = {
     "mode/all": None,
     "mode/imagery": "Imagery",
+    "mode/temporal": "Temporal",
 }
 
 
@@ -272,6 +273,11 @@ def mode_nodes(catalogue):
             "id": "mode/imagery",
             "label": "Imagery",
             "count": counts.get("Imagery", 0),
+        },
+        {
+            "id": "mode/temporal",
+            "label": "Temporal",
+            "count": counts.get("Temporal", 0),
         },
     ]
 

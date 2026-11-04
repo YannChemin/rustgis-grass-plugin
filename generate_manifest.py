@@ -257,6 +257,15 @@ COMMANDS = [
         "params": "{} (the panel's mode tree shows the same filter)",
     },
     {
+        "id": "temporal-state",
+        "label": "Temporal\nModules",
+        "help": "Open the GRASS GIS panel with its module tree filtered to the "
+        "temporal (t.*) modules. None can run from one raster: they read a "
+        "space-time dataset, so the panel's tree gives each one's reason.",
+        "icon": "stats",
+        "params": "{} (the panel's mode tree shows the same filter)",
+    },
+    {
         "id": "all-state",
         "label": "All\nModules",
         "help": "Open the GRASS GIS panel with its module tree showing every "
@@ -318,7 +327,8 @@ PANEL = {
     "title": "GRASS GIS",
     "icon": "stats",
     "help": "Reach the GRASS database, find a module, and run the ones that "
-    "need only a raster in and one out on a raster layer of the map.",
+    "need only a raster in and one out on a raster layer of the map. The "
+    "catalogue can show every module, or only the imagery or temporal ones.",
     "state": "raster-state",
     "items": [
         {"kind": "text", "id": "gisdbase", "label": "GRASS database"},
@@ -417,7 +427,7 @@ PANEL = {
             "id": "mode",
             "label": "Catalogue",
             "help": "Which modules the tree below lists: every installed module, "
-            "or the imagery (i.*) modules only.",
+            "the imagery (i.*) modules only, or the temporal (t.*) modules only.",
             "command": "raster-state",
         },
         {
@@ -428,7 +438,8 @@ PANEL = {
             "'Runs from here' lists the modules Run Module can drive on the "
             "chosen raster; 'All modules' lists every installed one with the "
             "reason the others need a form; 'Recently run' returns to one. The "
-            "Catalogue tree above keeps all modules or only the imagery ones.",
+            "Catalogue tree above keeps all modules, or only the imagery or "
+            "temporal ones.",
             "search": True,
             # Choosing a module refreshes the details under this tree (and the
             # chosen layer, which costs one raster.info) before Run Module is
@@ -501,6 +512,7 @@ FRENCH = {
     "Region": "Region",
     "Raster": "Raster",
     "Imagery": "Imagerie",
+    "Temporal": "Temporel",
     "Vector": "Vecteur",
     "Modules": "Modules",
     "Terrain": "Relief",
@@ -518,6 +530,7 @@ FRENCH = {
     "Viewshed": "Bassin de visibilite",
     "Run\nModule": "Lancer le\nmodule",
     "Imagery\nModules": "Modules\nd'imagerie",
+    "Temporal\nModules": "Modules\ntemporels",
     "All\nModules": "Tous les\nmodules",
     "GRASS\nDatabase": "Base GRASS",
     "Add\nMap": "Ajouter\nla carte",
@@ -691,7 +704,7 @@ def build():
     manifest = {
         "id": "grass-vector",
         "name": "GRASS GIS Tools",
-        "version": "0.6.0",
+        "version": "0.7.0",
         "description": (
             "Runs GRASS GIS modules: vector modules as geoprocessing tools, and "
             "every installed module from a panel and a tab of its own. GRASS "
@@ -790,6 +803,11 @@ def tab(tools, raster_menus=None, imagery_menus=None):
                 ],
             },
             {"label": "Vector", "layout": "small", "items": menus[:48]},
+            {
+                "label": "Temporal",
+                "layout": "small",
+                "items": ["panel", "temporal-state"],
+            },
             {
                 "label": "Modules",
                 "layout": "small",

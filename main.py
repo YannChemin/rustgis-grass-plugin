@@ -566,6 +566,8 @@ def run_command(req):
         return panel_state(req)
     if command == "imagery-state":
         return panel_state(req, "mode/imagery")
+    if command == "temporal-state":
+        return panel_state(req, "mode/temporal")
     if command == "all-state":
         return panel_state(req, "mode/all")
     if command == "run-module":

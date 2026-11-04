@@ -452,6 +452,27 @@ def test_the_module_tree_can_show_one_family_only():
     assert recent["children"] == []
 
 
+def test_the_module_tree_keeps_only_temporal_modules_in_its_mode():
+    catalogue = [
+        entry("r.slope.aspect"),
+        entry(
+            "t.rast.series",
+            "Temporal",
+            False,
+            reason="takes no raster",
+            temporal=True,
+        ),
+    ]
+    nodes, _ = raster.catalogue_tree(catalogue, family="Temporal")
+    runs, every, recent = nodes
+    assert runs["label"] == "Runs from here (0)"
+    assert every["label"] == "All temporal modules (1)"
+    assert [n["id"] for n in every["children"][0]["children"]] == [
+        "all/t.rast.series"
+    ]
+    assert recent["children"] == []
+
+
 def test_the_mode_tree_names_the_families_and_their_sizes():
     catalogue = [
         entry("r.slope.aspect"),
@@ -461,8 +482,10 @@ def test_the_mode_tree_names_the_families_and_their_sizes():
     assert raster.mode_nodes(catalogue) == [
         {"id": "mode/all", "label": "All modules", "count": 3},
         {"id": "mode/imagery", "label": "Imagery", "count": 2},
+        {"id": "mode/temporal", "label": "Temporal", "count": 0},
     ]
     assert raster.mode_family("mode/imagery") == "Imagery"
+    assert raster.mode_family("mode/temporal") == "Temporal"
     assert raster.mode_family("mode/all") is None
     assert raster.mode_family("mode/no-such-mode") is None
 

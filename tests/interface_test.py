@@ -553,9 +553,23 @@ def test_the_panel_keeps_an_imagery_mode_and_filters_the_module_tree(monkeypatch
     assert state["panel"]["items"]["mode"]["nodes"] == [
         {"id": "mode/all", "label": "All modules", "count": 1},
         {"id": "mode/imagery", "label": "Imagery", "count": 1},
+        {"id": "mode/temporal", "label": "Temporal", "count": 0},
     ]
     assert (
         state["panel"]["items"]["modules"]["nodes"][1]["label"]
         == "All imagery modules (1)"
     )
     assert "Showing imagery modules only." in state["panel"]["items"]["status"]["text"]
+
+
+def test_the_temporal_state_command_opens_the_temporal_mode(monkeypatch):
+    import main
+
+    seen = []
+    monkeypatch.setattr(
+        main,
+        "panel_state",
+        lambda req, mode=None: seen.append(mode) or {"panel": {}},
+    )
+    assert main.run_command({"id": "temporal-state"}) == {"panel": {}}
+    assert seen == ["mode/temporal"]
