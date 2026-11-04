@@ -1,3 +1,23 @@
+rustgis-grass-plugin (0.6.0) unstable; urgency=medium
+
+  * The panel's module catalogue has a mode tree: All modules or Imagery. The
+    Imagery mode keeps the three branches but shows only the 176 i.* modules,
+    labels the all branch accordingly, filters Recently run too, and says in
+    the status line that imagery modules only are shown.
+  * A new Imagery ribbon group holds the panel, an Imagery Modules button and
+    menus for the seven i.* modules Run Module can drive from one raster:
+    i.edge and i.zc under Enhance, i.destripe and i.sar.speckle under
+    Preprocess, i.water and i.emissivity under Detect, and i.rotate under
+    Geometry. An All Modules button in the Modules group restores the whole
+    catalogue.
+  * The Recently run branch is always present, labelled Recently run (0) until
+    something has run, so the panel always has its three branches.
+  * The manifest now carries 37 commands, 64 tools, 6 ribbon groups and 23
+    panel items, against 1,175 readable modules on this machine. The manifest's
+    version is 0.6.0.
+
+ -- Yann Chemin <dr.yann.chemin@gmail.com>  Wed, 04 Nov 2026 10:00:00 +0100
+
 rustgis-grass-plugin (0.5.0) unstable; urgency=medium
 
   * The panel's catalogue now says what can actually be run: a module is

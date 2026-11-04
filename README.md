@@ -100,7 +100,7 @@ parameters per tool.
 From the package, on Debian or Ubuntu:
 
 ```sh
-sudo apt install ./dist/rustgis-grass-plugin_0.5.0_all.deb
+sudo apt install ./dist/rustgis-grass-plugin_0.6.0_all.deb
 rustgis-grass-setup          # once per user; again after upgrading GRASS
 ```
 

@@ -202,11 +202,43 @@ Result: **89 tests pass**. `make check` passes under the Debian build as well.
 - `.gitignore`: release exception moved from 0.3.0 to 0.5.0.
 - Built `dist/rustgis-grass-plugin_0.5.0_all.deb` with `make deb`.
 
+### 7. Imagery group and catalogue mode
+
+- `grass_bridge/raster.py`:
+  - `MODE_FAMILIES` maps `mode/all` and `mode/imagery` to the family each
+    keeps;
+  - `mode_family(mode)` resolves a mode tree node;
+  - `mode_nodes(catalogue)` returns the mode tree with module counts;
+  - `catalogue_tree(..., family=None)` filters runs/all/recent to one family
+    and labels the branch `All imagery modules (176)` when filtered.
+- `generate_manifest.py`:
+  - `IMAGERY_COMMANDS` adds commands for the seven i.* modules the panel can
+    drive from one raster, under Enhance, Preprocess, Detect and Geometry;
+  - new commands `imagery-state` and `all-state` set the catalogue mode;
+  - a `mode` tree item ("Catalogue") switches between all and imagery;
+  - a new Imagery ribbon group holds the panel, Imagery Modules and the
+    imagery menus; the Modules group gains All Modules.
+- `main.py`:
+  - `panel_state(req, mode=None)` keeps or sets the catalogue mode, returns the
+    mode tree, filters the module tree, and says when a family is shown;
+  - `imagery-state` and `all-state` call it with the matching mode;
+  - `run_module` rebuilds the module tree with the same filter after a run.
+- The Recently run branch is now always present, labelled `Recently run (0)`
+  until something has run, so the panel always has its three branches.
+- Tests: family filtering, mode nodes/family lookup, the empty recent branch,
+  and panel-state mode wiring. **93 tests pass**.
+- i18n: Imagery, the two ribbon buttons, the four imagery menus, Catalogue and
+  the mode labels in French.
+- Documentation updated for the Imagery group, the Catalogue mode, 25 curated
+  modules and the current 1,175-module catalogue.
+- Version bumped `0.5.0` → `0.6.0`, with a new `debian/changelog` entry, the
+  man page date and version, and the `.gitignore` release exception.
+
 ## Verification
 
-- `python3 -m pytest -q tests` → 89 passed.
+- `python3 -m pytest -q tests` → 93 passed.
 - `rustgis-cli commands --plugin . --no-plugins` loaded the generated manifest
-  successfully and listed all 28 commands.
+  successfully and listed all 37 commands.
 - `rustgis-cli run --plugin . --no-plugins` with `raster-state` produced the
   three-branch tree and the "Choose a module" details text.
 - Full end-to-end run on `crates/map/testdata/qgis/generated/data/dem.tif`:
@@ -220,31 +252,34 @@ Result: **89 tests pass**. `make check` passes under the Debian build as well.
 
 ## Key numbers
 
-- 1,174 modules read; 5 could not be read.
+- 1,175 modules read; 5 could not be read.
 - 64 vector tools; 64 more could have fit.
-- 18 curated raster commands (down from 27).
+- 18 curated raster commands and 7 curated imagery commands (raster was 27
+  before the runnability work).
 - 88 modules runnable via Run Module: Raster 70, Imagery 9, Planetary 9.
-- 22 panel items (limit 32).
-- 28 commands, 64 tools, 5 ribbon groups.
-- Tree size about 1,300 nodes (limit 5,000).
+- 23 panel items (limit 32).
+- 37 commands, 64 tools, 6 ribbon groups.
+- Tree size about 1,300 nodes (limit 5,000); the Imagery mode holds 176.
 
 ## Files changed
 
 - `grass_bridge/interface.py` — `TEMPORAL_ELEMENTS`, `_prompt`,
   `_needs_text`, `_runnability`, `describe`.
 - `grass_bridge/raster.py` — `catalogue_tree`, `entry_for`, `module_details`,
-  `remember` / `read_recents`, `free_module_args`.
+  `remember` / `read_recents`, `free_module_args`, `mode_nodes` /
+  `mode_family`.
 - `generate_manifest.py` — catalogue fields, runnable-only commands, version,
-  panel/tab groups, i18n.
-- `main.py` — tree, details and recents wiring.
+  panel/tab groups, imagery commands and mode, i18n.
+- `main.py` — tree, details and recents wiring, catalogue mode and its
+  commands.
 - `README.md`, `skills/grass/SKILL.md`, `debian/changelog`,
   `man/rustgis-grass-setup.1`.
 - `tests/interface_test.py`, `tests/raster_test.py`.
-- `.gitignore`, `dist/rustgis-grass-plugin_0.5.0_all.deb`.
+- `.gitignore`, `debian/changelog`, `man/rustgis-grass-setup.1`,
+  `dist/rustgis-grass-plugin_0.6.0_all.deb`.
 
 ## Possible next steps
 
-- Add a dedicated Imagery ribbon group and imagery-specific catalogue mode.
 - Add a Temporal group/mode once space-time dataset handling is designed.
 - Consider a lighter `module-details` command so selecting a module does not
   re-send the full tree.

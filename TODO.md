@@ -262,12 +262,57 @@ Using `crates/map/testdata/qgis/generated/data/dem.tif`, the sequence
 ran `r.slope.aspect`, wrote `DEM_r-slope-aspect.tif`, recorded
 `["r.slope.aspect"]` in `recent.json`, and updated the status and details.
 
+## 10. Imagery group and catalogue mode
+
+### DONE — Always show the Recently run branch
+
+`catalogue_tree()` now returns `branch/recent` even when nothing has run,
+labelled `Recently run (0)` with no children, so the panel always has its
+three branches.
+
+### DONE — Add family filtering and mode nodes
+
+`MODE_FAMILIES`, `mode_family()` and `mode_nodes()` were added to
+`grass_bridge/raster.py`. `catalogue_tree(..., family=...)` keeps only that
+family, labels the all branch `All imagery modules (176)`, and filters the
+Recent branch too.
+
+### DONE — Add the Catalogue mode tree
+
+`PANEL` has a `mode` tree ("Catalogue") holding All modules and Imagery, with
+counts. `panel_state(req, mode=None)` keeps or sets the mode, fills the mode
+tree, filters the module tree and says "Showing imagery modules only." in the
+status line.
+
+### DONE — Add the Imagery ribbon group and commands
+
+`IMAGERY_COMMANDS` gives the seven runnable i.* modules commands under
+Enhance, Preprocess, Detect and Geometry. The new Imagery group holds the
+panel, `imagery-state` and those menus. `all-state` in the Modules group
+restores the whole catalogue. Both commands call `panel_state` with the
+matching mode, which returns the value so the mode tree reflects it.
+
+### DONE — Keep the filter after a run
+
+`run_module` reads `values["mode"]` and rebuilds the module tree with the same
+family filter after a run.
+
+### DONE — Test and document
+
+Tests cover family filtering, mode nodes and lookup, the empty Recent branch,
+and panel-state mode wiring. `python3 -m pytest -q tests` passes 93 tests. The
+README and SKILL describe the Imagery group, the Catalogue mode and the seven
+imagery commands; the manifest now carries 37 commands, 6 ribbon groups, 23
+panel items and 1,175 readable modules.
+
+### DONE — Bump and package 0.6.0
+
+`plugin.json` is generated as version `0.6.0`. `debian/changelog` has a `0.6.0`
+entry, `man/rustgis-grass-setup.1` is bumped, the README installs the new
+package, and `.gitignore` points its release exception at
+`dist/rustgis-grass-plugin_0.6.0_all.deb`.
+
 ## Remaining work
-
-### TODO — Add an Imagery ribbon group and mode
-
-Add an Imagery group and an imagery-specific catalogue mode so i.* modules are
-one click away rather than only reachable through the general tree.
 
 ### TODO — Add a Temporal group and mode
 
