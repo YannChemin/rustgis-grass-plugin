@@ -66,10 +66,12 @@ on the file and add the result back.
   take parameters from the panel instead of GRASS's defaults: `raster-slope` (degrees
   or percent), `raster-aspect` and `raster-viewshed` (height, range, earth curvature,
   from the centre of the map).
-- Any other installed module is run by choosing it in the panel's module tree and
-  running `run-module`. The tree has three branches: **Runs from here** (the modules
-  Run Module can drive), **All modules** (every installed module, with the reason the
-  others cannot be driven) and **Recently run**. The panel's **Catalogue** tree keeps
+- Any other installed module is run by choosing it in the panel's module tree, filling
+  or accepting its **Module parameters** form, and running `run-module`. The tree has
+  three branches: **Runs from here** (the modules Run Module can drive), **All modules**
+  (every installed module, with the reason the others cannot be driven) and **Recently
+  run**. Any readable module shows its parameters in the form, but only the 88 that read
+  one raster and write one can run here. The panel's **Catalogue** tree keeps
   all modules, only the imagery ones, or only the temporal ones; `imagery-state` and
   `temporal-state` turn those filters on and `all-state` turns them off. No temporal
   module can run from one raster (they read a space-time dataset), so the Temporal
@@ -78,20 +80,29 @@ on the file and add the result back.
   drive; the others carry their reason, such as *needs several bands*, *needs an
   imagery group* or *needs a display*, so tell the user what the module needs instead
   of offering a run that would fail.
-- A command has no form, so a curated or tree-driven module runs with **GRASS's own
-  defaults** for everything but its input and output. Tell the user that, rather than
-  implying the parameters were chosen.
+- Choosing a module fills the panel's **Module parameters** form with that module's
+  own parameters, read from its GRASS interface description. Text boxes, numbers,
+  checkboxes for flags, selection lists for choices and multi-selection lists for
+  parameters that take several values are there; a required field is marked `*`, and a
+  range such as `rescale=0,255` stays a text field. Fields start at the module's
+  defaults. `run-module` sends the values the form holds, and a field left empty is
+  left out, so GRASS uses its own default for it. Tell the user which values were
+  actually sent, rather than implying a default was chosen.
 - The tree's node ids carry a branch prefix (`runs/`, `all/`, `recent/`);
   `run-module` strips it. A family or branch node is refused with a request to choose
   a module.
-- The panel's values go with any run, so a script sets them:
+- The panel's values go with any run, so a script sets them. A tree-driven module
+  takes its parameters under `form`, by the field ids the panel's form uses:
 
 ```
+plugin:grass-vector/run-module={"panel": {"raster": "3", "modules": "all/r.slope.aspect", "form": {"format": "percent", "flag_a": true}}}
 plugin:grass-vector/r-watershed={"panel": {"raster": "3", "band": 1}}
 ```
 
   `raster` is the layer **id** as `host.layers` gives it, not its name. Without one,
-  the active raster layer is used, or the only one if there is just one.
+  the active raster layer is used, or the only one if there is just one. `modules`
+  carries the chosen module's id (`runs/`, `all/` or `recent/` prefix), and `form`
+  holds only the fields the user changed: the rest stay at the module's defaults.
 - RustGIS writes one band of a raster that is not a colour one, so the panel's **band**
   slider says which band GRASS sees. Its ends come from `raster.info`, so a cube's
   bands are all reachable; say which band a result came from.

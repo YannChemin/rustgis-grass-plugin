@@ -344,6 +344,50 @@ and the `.gitignore` exception point at the `0.7.0` package. The refreshed
 catalogue has 1,181 installed / 1,176 readable modules, 38 commands, 64 tools,
 7 ribbon groups and 23 panel items.
 
+## 12. The chosen module's form
+
+### DONE — Add a form kind to the RustGIS panel
+
+`crates/plugins/src/panel.rs` now has `FormField` (id, kind, label, help,
+choices, default, required, integer), `form` in `KINDS`, and the limits 64
+fields, 64-character ids and 256 choices. `ItemState.fields` carries a module's
+fields, `PanelState::form` and `form_value` read them, and `apply` normalizes a
+form: a value is made to its field's kind, a field the new module does not have
+is dropped, and a new field starts at its default. `set_values` merges an update
+from the UI. Two panel tests cover it.
+
+### DONE — Draw the form in the panel
+
+`crates/ui-egui/src/pluginpanel.rs` renders a two-column grid: text, number
+(red when the text is not a number), checkbox, select and multi-select. Text
+and number fields send when they lose focus; the others send at once. A
+required field is marked `*`, and `State.typing` keeps a half-typed number from
+being overwritten by a state refresh. One UI test covers the number parsing.
+
+### DONE — Read the fields from GRASS
+
+`grass_bridge/interface.py` maps a module's parameters to form fields, leaves
+out the input, output and layer the caller names and the rasters and tables the
+panel cannot pass, and marks whole numbers, multiple choices and required
+fields. A number with several key values, or a string default, stays text, so a
+range such as `i.pca`'s `rescale=0,255` is not lost. Labels and help are clipped
+to what RustGIS shows.
+
+### DONE — Send the form with Run Module
+
+`grass_bridge/raster.py` turns the form's values into GRASS arguments: flags,
+choices, multi-values and numbers, leaving out empty and unknown values.
+`main.py` appends them to `run-module`'s free arguments, and `panel_state` sends
+the chosen module's fields with the details. `generate_manifest.py` adds the
+`form` panel item and puts each module's fields in `modules.json`.
+
+### DONE — Test, document and package 0.8.0
+
+`make check` is 100 passing; the RustGIS panel tests and the UI number test
+pass. The README, the skill, this history, the changelog and the man page name
+the form, the 24 panel items and version `0.8.0`; the `.gitignore` exception and
+the README install line point at the `0.8.0` package.
+
 ## Remaining work
 
 ### TODO — Run temporal modules from a space-time dataset
@@ -365,6 +409,15 @@ keep selection cheap, at the cost of one more command.
 RustGIS stops a plugin command after two minutes. Large rasters may need the
 region narrowed first; amortising GRASS project creation or raising the cap
 would make large runs practical.
+
+### TODO — Let the form make more modules runnable
+
+Runnability is still decided without the form: a module with a required
+parameter or flag the form can fill is marked as not runnable and cannot be
+chosen for a run. With the form, some of those could run once the user fills
+what is required: the rule would need to say which requirements are reachable
+from the form and which name a raster, table or group the panel cannot pass,
+and `run-module` would need to check the form is complete before running.
 
 ### TODO — Refresh the screenshot
 

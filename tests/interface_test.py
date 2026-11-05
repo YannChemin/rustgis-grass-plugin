@@ -163,6 +163,25 @@ def test_form_fields_keep_multiple_choices_and_whole_numbers():
     assert by["count"]["default"] == 3.0
 
 
+def test_form_fields_keep_a_range_of_numbers_as_written():
+    xml = """<task name="i.example">
+      <parameter name="rescale" type="integer" required="no">
+        <description>Rescaling range for output maps</description>
+        <keydesc><item>min</item><item>max</item></keydesc>
+        <default>0,255</default>
+      </parameter>
+      <parameter name="count" type="integer" required="no">
+        <description>How many</description>
+        <keydesc><item>count</item></keydesc>
+        <default>3</default>
+      </parameter>
+    </task>"""
+    by = {f["id"]: f for f in interface.form_fields(xml)}
+    assert by["rescale"]["kind"] == "text", "one number field cannot hold a range"
+    assert by["rescale"]["default"] == "0,255"
+    assert by["count"]["kind"] == "number"
+
+
 def test_form_fields_carry_a_separate_label_and_help():
     xml = """<task name="r.example">
       <parameter name="size" type="float" required="no">

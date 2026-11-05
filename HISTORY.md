@@ -317,6 +317,93 @@ pretended in the panel.
 - `.gitignore`, `debian/changelog`, `man/rustgis-grass-setup.1`,
   `dist/rustgis-grass-plugin_0.7.0_all.deb`.
 
+## This session — the chosen module's form (0.8.0)
+
+### Objective
+
+Close the gap the previous session measured: every readable module was reachable
+from the panel, but only a tool or a curated command had a form, so a
+tree-driven module could only run on GRASS's own defaults. Give the panel a
+**Module parameters** form filled from the chosen module's
+`--interface-description`, and pass those values to `run-module`.
+
+### What RustGIS needed
+
+The host's panel kinds were text, checkbox, slider, button and tree. A form is a
+sixth kind, because a plugin cannot know a module's parameters at manifest-build
+time and the panel state is the only channel that can carry them. The host
+change is in `~/dev/RustGIS`:
+
+- `crates/plugins/src/panel.rs`: new `FormField` (`id`, `kind`, `label`, `help`,
+  `choices`, `default`, `required`, `integer`), `form` in `KINDS`, limits
+  `MAX_FORM_FIELDS=64`, `MAX_FORM_FIELD_ID=64`, `MAX_FORM_CHOICES=256`,
+  `ItemState.fields`, `PanelState::form` / `form_value`, and normalization in
+  `apply`: values are made to the declared kind, a field the new module lacks is
+  dropped, a new field starts at its default. `set_values` merges a form update.
+- `crates/ui-egui/src/pluginpanel.rs`: `form()` renders a two-column grid of
+  text boxes, number boxes (red stroke when the text is not a number),
+  checkboxes, selection lists and multi-selection lists. Text and number fields
+  send on losing focus, the others at once; a required field is marked `*`.
+  `State.typing` keeps a half-typed number from being overwritten by a state
+  refresh.
+- Tests: two panel tests (a form takes its fields and starts at defaults; it
+  ignores fields and values it cannot take) and one UI test (the number field
+  reads whole and fractional text, and rejects `3.5` where a whole is needed).
+
+The host still accepts the old manifests unchanged: a panel without a form
+behaves as before.
+
+### What the plugin did
+
+- `grass_bridge/interface.py`: `parse` was split into `_specs` (which keeps
+  `help`, `multiple`, `integer` and the number of `keydesc` items) and `parse`;
+  new `form_fields` maps a parameter to text, number, checkbox, select or multi,
+  clips a label to 200 and help to 2,000 characters, and leaves out what the
+  panel's caller names (input, output, layer) or cannot pass (rasters, tables).
+  A numeric parameter with more than one key value, or a string default, becomes
+  text, so `i.pca`'s `rescale=0,255` survives.
+- `grass_bridge/raster.py`: `form_of` exposes the cached fields, and `form_args`
+  turns the form's values into GRASS arguments: a checked flag becomes `-n`, a
+  multi-selection `name=a,b`, a select is checked against the module's choices,
+  a whole number loses its `.0`, and an empty or unknown value is left out.
+- `main.py`: `run_module` appends `raster.form_args(...)` to the free input and
+  output arguments; `panel_state` sends `"form": {"fields": ...}` for the chosen
+  module in both the tree refresh and the mode refresh.
+- `generate_manifest.py`: a `form` panel item (the 24th) between the chosen
+  module's details and Run Module, and a `form` list on each catalogue entry,
+  so the panel can show parameters without another GRASS call.
+- Tests: form mapping (choices, whole numbers, multi-values, label/help, and a
+  range staying text), `form_args` (flags, choices, multi, numbers, empty text,
+  unknown fields), and the panel state carrying the chosen module's fields.
+  `make check` is 100 passing.
+
+### Verification
+
+- `cargo test -p rustgis-plugins` — 39 passed, 2 ignored; the panel tests
+  include the two new form cases.
+- `cargo test -p rustgis-ui-egui --lib pluginpanel::tests::a_form_field_reads` —
+  passes; `cargo check -p rustgis-ui-egui` is clean.
+- `make check` in the plugin — 100 passed.
+- The regenerated manifest has 1,176 catalogue entries, each with its form;
+  `r.slope.aspect` shows `format`, `precision`, `zscale`, `min_slope`, `nprocs`,
+  `memory` and its flags; `i.pca` shows `rescale` as text with `0,255`;
+  `t.in.era5` shows its 35 climate variables and pressure levels as multi
+  fields.
+- Panel items: 24 (limit 32). Version 0.8.0.
+
+### Files changed
+
+- `grass_bridge/interface.py` — `_specs`, `parse`, `form_fields`, `keys`.
+- `grass_bridge/raster.py` — `form_of`, `form_args`, details wording.
+- `main.py` — form arguments in `run_module`; form fields in `panel_state`.
+- `generate_manifest.py` — form item, catalogue forms, version 0.8.0.
+- `tests/interface_test.py`, `tests/raster_test.py` — form tests.
+- `README.md`, `skills/grass/SKILL.md`, `HISTORY.md`, `TODO.md`,
+  `debian/changelog`, `man/rustgis-grass-setup.1`, `.gitignore`.
+- `~/dev/RustGIS/crates/plugins/src/panel.rs`,
+  `~/dev/RustGIS/crates/ui-egui/src/pluginpanel.rs`,
+  `~/dev/RustGIS/crates/plugins/src/lib.rs`.
+
 ## Possible next steps
 
 - Run temporal modules once space-time dataset handling is designed.

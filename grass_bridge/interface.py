@@ -349,6 +349,9 @@ def _specs(xml_text):
             "required": param.get("required") == "yes",
             "multiple": param.get("multiple") == "yes",
             "integer": param.get("type") == "integer",
+            # A parameter with several key values takes a list or a range,
+            # which one number field cannot hold (i.pca's rescale=0,255).
+            "keys": len(param.findall("keydesc/item")),
         }
         description = _text(param.find("description"))
         written = _text(param.find("label"))
@@ -390,6 +393,7 @@ def _specs(xml_text):
                 "required": False,
                 "multiple": False,
                 "integer": False,
+                "keys": 0,
                 "default": False,
             }
         )
@@ -451,6 +455,11 @@ def form_fields(xml_text):
         }.get(spec["kind"])
         if kind is None:
             continue
+        if kind == "number" and (
+            spec.get("keys", 0) > 1 or isinstance(spec.get("default"), str)
+        ):
+            # A range or a list of numbers stays as it is written.
+            kind = "text"
         field = {
             "id": spec["name"],
             "kind": kind,

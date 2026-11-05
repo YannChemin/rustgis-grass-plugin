@@ -20,8 +20,9 @@ from grass_bridge import interface, session
 HERE = pathlib.Path(__file__).parent
 
 #: A manifest takes at most this many tools, so only this many modules can
-#: have a form of their own. Every other module is reached from the panel's
-#: tree, which holds them all.
+#: have a tool form of their own. Every other module is reached from the
+#: panel's tree, which holds them all, and the panel's form shows its
+#: parameters.
 MAX_TOOLS = 64
 
 #: Modules that get a tool first, whatever else is installed: the work RustGIS
@@ -460,7 +461,7 @@ PANEL = {
             "label": "Module parameters",
             "help": "The chosen module's own parameters, from its GRASS "
             "interface description. A required field is marked *; Run Module "
-            "passes everything the form holds.",
+            "passes the values the form holds.",
         },
         {"kind": "button", "command": "run-module"},
         {"kind": "text", "id": "status", "label": "Last run"},
@@ -499,7 +500,7 @@ def raster_commands(catalogue, planned=None):
                         f"{module}: {entry['summary']}" if entry["summary"] else module
                     )[:300]
                     + " Runs on the layer chosen in the GRASS GIS panel, with "
-                    "the parameters the panel's form holds.",
+                    "the band and region the panel holds.",
                     "icon": "stats",
                     "params": "{} (the GRASS GIS panel chooses the layer, the "
                     "band and the region)",
@@ -716,7 +717,7 @@ def build():
     manifest = {
         "id": "grass-vector",
         "name": "GRASS GIS Tools",
-        "version": "0.7.0",
+        "version": "0.8.0",
         "description": (
             "Runs GRASS GIS modules: vector modules as geoprocessing tools, and "
             "every installed module from a panel and a tab of its own. GRASS "

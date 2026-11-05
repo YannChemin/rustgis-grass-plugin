@@ -1,3 +1,20 @@
+rustgis-grass-plugin (0.8.0) unstable; urgency=medium
+
+  * The panel gains a Module parameters form: choosing a module fills it with
+    that module's own parameters, read from its GRASS interface description,
+    and Run Module sends the values it holds, so a tree-driven module no
+    longer runs on GRASS's defaults alone. Fields are text, whole or
+    fractional numbers, flags as checkboxes, choices as selection lists, and
+    several choices as multi-selection lists; required fields are marked,
+    defaults are shown, a range such as i.pca's rescale=0,255 stays a text
+    field, and a field left empty is left out so GRASS applies its own
+    default. Only the 88 modules that read one raster and write one can run
+    from here; the rest still show their parameters but keep their reason.
+  * The manifest now carries 24 panel items, 38 commands, 64 tools and 7
+    ribbon groups, and its version is 0.8.0.
+
+ -- Yann Chemin <dr.yann.chemin@gmail.com>  Thu, 05 Nov 2026 12:00:00 +0100
+
 rustgis-grass-plugin (0.7.0) unstable; urgency=medium
 
   * The panel's catalogue gains a Temporal mode. The mode tree now lists All
