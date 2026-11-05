@@ -327,8 +327,9 @@ PANEL = {
     "title": "GRASS GIS",
     "icon": "stats",
     "help": "Reach the GRASS database, find a module, and run the ones that "
-    "need only a raster in and one out on a raster layer of the map. The "
-    "catalogue can show every module, or only the imagery or temporal ones.",
+    "need only a raster in and one out on a raster layer of the map. The form "
+    "sets the chosen module's own parameters. The catalogue can show every "
+    "module, or only the imagery or temporal ones.",
     "state": "raster-state",
     "items": [
         {"kind": "text", "id": "gisdbase", "label": "GRASS database"},
@@ -437,7 +438,7 @@ PANEL = {
             "help": "Searchable by module name, summary and GRASS keywords. "
             "'Runs from here' lists the modules Run Module can drive on the "
             "chosen raster; 'All modules' lists every installed one with the "
-            "reason the others need a form; 'Recently run' returns to one. The "
+            "reason the others cannot run here; 'Recently run' returns to one. The "
             "Catalogue tree above keeps all modules, or only the imagery or "
             "temporal ones.",
             "search": True,
@@ -452,6 +453,14 @@ PANEL = {
             "label": "Chosen module",
             "help": "What the module reads and writes, and whether Run Module "
             "can drive it from this panel.",
+        },
+        {
+            "kind": "form",
+            "id": "form",
+            "label": "Module parameters",
+            "help": "The chosen module's own parameters, from its GRASS "
+            "interface description. A required field is marked *; Run Module "
+            "passes everything the form holds.",
         },
         {"kind": "button", "command": "run-module"},
         {"kind": "text", "id": "status", "label": "Last run"},
@@ -477,8 +486,8 @@ def raster_commands(catalogue, planned=None):
     for menu, wanted in (RASTER_COMMANDS if planned is None else planned).items():
         for module in wanted:
             entry = entries.get(module)
-            # A command has no form, so only a module Run Module can actually
-            # drive is offered; the rest keep their reason in the panel's tree.
+            # Only a module Run Module can actually drive is offered; the
+            # rest keep their reason in the panel's tree.
             if not entry or not entry.get("runnable"):
                 continue
             cid = raster_command_id(module)
@@ -490,7 +499,7 @@ def raster_commands(catalogue, planned=None):
                         f"{module}: {entry['summary']}" if entry["summary"] else module
                     )[:300]
                     + " Runs on the layer chosen in the GRASS GIS panel, with "
-                    "GRASS's own defaults.",
+                    "the parameters the panel's form holds.",
                     "icon": "stats",
                     "params": "{} (the GRASS GIS panel chooses the layer, the "
                     "band and the region)",
@@ -630,6 +639,9 @@ def build():
                 "needs": described["needs"],
                 "bands": described["bands"],
                 "temporal": described["temporal"],
+                # The parameters Run Module's form offers: what a command
+                # cannot ask before the panel existed.
+                "form": interface.form_fields(docs[module]),
             }
         )
         if described["vector_in"] and described["vector_out"]:

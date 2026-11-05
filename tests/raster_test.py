@@ -536,6 +536,40 @@ def test_run_module_names_the_input_and_output_the_module_requires():
     assert raster.free_module_args(watershed) == ["elevation=src", "basin=out"]
 
 
+def test_form_args_name_flags_choices_multiples_and_numbers():
+    entry = {
+        "module": "r.example",
+        "form": [
+            {"id": "method", "kind": "select", "choices": ["fast", "slow"]},
+            {"id": "vars", "kind": "multi", "choices": ["a", "b"]},
+            {"id": "count", "kind": "number", "integer": True},
+            {"id": "distance", "kind": "number"},
+            {"id": "label", "kind": "text"},
+            {"id": "flag_n", "kind": "checkbox"},
+        ],
+    }
+    values = {
+        "method": "fast",
+        "vars": ["a", "b"],
+        "count": 2.0,
+        "distance": 1.5,
+        "label": "",
+        "flag_n": True,
+        "not_a_field": "ignored",
+    }
+    assert raster.form_args(entry, values) == [
+        "method=fast",
+        "vars=a,b",
+        "count=2",
+        "distance=1.5",
+        "-n",
+    ]
+    # A value the module does not offer, and an empty text, are left out.
+    assert raster.form_args(entry, {"method": "nope", "label": ""}) == []
+    assert raster.form_args(entry, {"vars": "a,b"}) == ["vars=a,b"]
+    assert raster.form_args(entry, None) == []
+
+
 def test_run_module_refuses_a_module_it_cannot_drive_and_says_why():
     with pytest.raises(session.GrassError) as e:
         raster.free_module_args(
@@ -548,7 +582,7 @@ def test_the_details_text_states_what_a_module_needs():
     runnable = raster.module_details(entry("r.slope.aspect"))
     assert "r.slope.aspect" in runnable
     assert "Reads: input" in runnable and "Writes: output" in runnable
-    assert "Runs here with GRASS's own defaults" in runnable
+    assert "the form above sets its parameters" in runnable
 
     blocked = raster.module_details(
         entry(

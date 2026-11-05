@@ -445,16 +445,14 @@ def module_details(entry):
         lines.append("Writes: " + ", ".join(writes))
     if entry.get("runnable"):
         lines.append(
-            "Runs here with GRASS's own defaults on one band of the chosen "
-            "raster."
-            if entry.get("bands")
-            else "Runs here with GRASS's own defaults."
+            "Runs here; the form above sets its parameters, GRASS's defaults "
+            "until changed."
         )
     else:
         lines.append(
             "Not runnable from this panel: "
             + (entry.get("reason") or "it needs a form")
-            + "."
+            + ". The form above shows the parameters it takes."
         )
     if entry.get("needs"):
         lines.append("Needs: " + ", ".join(entry["needs"]))
@@ -539,6 +537,66 @@ def free_module_args(entry):
             f"{entry['module']} has no single input and output the bridge can name"
         )
     return [f"{source}=src", f"{target}=out"]
+
+
+def form_of(entry):
+    """Return the fields the panel's form shows for one module, if any."""
+    return (entry or {}).get("form") or []
+
+
+def form_args(entry, values):
+    """Return GRASS arguments for the form fields the user set.
+
+    Only fields the module's own form declares are read: a checkbox set to
+    true is its flag, a choice must be one the module offers, a ``multi``
+    field is its choices joined by commas, and an empty text field is left
+    out so GRASS keeps its own default.
+
+    :param entry: a catalogue entry, whose ``form`` names its fields
+    :param values: the panel's form value, ``{field id: value}``
+    :return: a list of ``name=value`` and ``-flag`` arguments
+    """
+    fields = {f["id"]: f for f in form_of(entry)}
+    args = []
+    for name, value in (values or {}).items():
+        field = fields.get(name)
+        if not field:
+            continue
+        kind = field.get("kind")
+        if kind == "checkbox":
+            if value is True:
+                args.append(f"-{name.removeprefix('flag_')}")
+            continue
+        if kind == "multi":
+            if isinstance(value, str):
+                parts = value.split(",")
+            elif isinstance(value, list):
+                parts = value
+            else:
+                continue
+            choices = field.get("choices") or []
+            picked = [
+                str(p).strip()
+                for p in parts
+                if str(p).strip() and str(p).strip() in choices
+            ]
+            if picked:
+                args.append(f"{name}={','.join(picked)}")
+            continue
+        if kind == "select":
+            text = str(value)
+            if text and text in (field.get("choices") or []):
+                args.append(f"{name}={text}")
+            continue
+        if kind == "number":
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                continue
+            args.append(f"{name}={int(value) if field.get('integer') else value}")
+            continue
+        text = str(value)
+        if text:
+            args.append(f"{name}={text}")
+    return args
 
 
 def output_dir():

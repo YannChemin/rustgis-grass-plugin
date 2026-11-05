@@ -29,6 +29,9 @@ TEMPORAL_ELEMENTS = frozenset({"stds", "strds", "stvds", "str3ds", "stdsp"})
 #: A plugin manifest allows this many parameters per tool.
 MAX_PARAMS = 32
 
+#: A panel form allows this many fields, matching RustGIS's own limit.
+MAX_FORM_FIELDS = 64
+
 
 #: A file parameter the module writes rather than reads, whatever its
 #: ``age`` says. Such a file would have to exist before the user could pick
@@ -300,13 +303,14 @@ def describe(xml_text):
     return out
 
 
-def parse(xml_text):
-    """Describe one module from its ``--interface-description`` output.
+def _specs(xml_text):
+    """Read one module's parameters, before a caller trims them to its own budget.
 
-    :param xml_text: the XML the module printed
-    :return: ``{"module", "summary", "keywords", "params", "skipped"}``, where
-        ``params`` is ready for a plugin manifest and ``skipped`` names the
-        parameters the bridge had to leave out, so a caller can say so
+    Each parameter carries the details a tool's manifest ignores but a form
+    uses: whether it is ``multiple``, whether a number is an ``integer``, and
+    the description as ``help`` when the parameter has a separate label.
+
+    :return: ``(task, module, summary, params, skipped)``
     :raises ValueError: when the document is not a GRASS task description
     """
     try:
@@ -340,9 +344,16 @@ def parse(xml_text):
             "label": _text(param.find("label"))
             or _text(param.find("description"))
             or name,
+            "help": "",
             "kind": kind,
             "required": param.get("required") == "yes",
+            "multiple": param.get("multiple") == "yes",
+            "integer": param.get("type") == "integer",
         }
+        description = _text(param.find("description"))
+        written = _text(param.find("label"))
+        if written and description and written != description:
+            spec["help"] = description
         if kind == "choice":
             spec["choices"] = _choices(param)
             if not spec["choices"]:
@@ -355,7 +366,7 @@ def parse(xml_text):
                 if spec["kind"] == "number" and _is_number(default)
                 else default
             )
-        if param.get("multiple") == "yes" and spec["kind"] == "vectorLayer":
+        if spec["multiple"] and spec["kind"] == "vectorLayer":
             # Several layers would arrive as one name; keep the first only.
             spec["label"] += " (one layer)"
         params.append(spec)
@@ -368,23 +379,43 @@ def parse(xml_text):
         if not VALID_NAME.match(f"flag_{name}"):
             skipped.append(f"-{name}")
             continue
+        written = _text(flag.find("label"))
+        description = _text(flag.find("description"))
         params.append(
             {
                 "name": f"flag_{name}",
-                "label": _text(flag.find("label"))
-                or _text(flag.find("description"))
-                or f"-{name}",
+                "label": written or description or f"-{name}",
+                "help": description if written and description and written != description else "",
                 "kind": "bool",
+                "required": False,
+                "multiple": False,
+                "integer": False,
                 "default": False,
             }
         )
 
+    return task, module, label, params, skipped
+
+
+def parse(xml_text):
+    """Describe one module from its ``--interface-description`` output.
+
+    :param xml_text: the XML the module printed
+    :return: ``{"module", "summary", "keywords", "params", "skipped"}``, where
+        ``params`` is ready for a plugin manifest and ``skipped`` names the
+        parameters the bridge had to leave out, so a caller can say so
+    :raises ValueError: when the document is not a GRASS task description
+    """
+    task, module, label, params, skipped = _specs(xml_text)
+    params = [
+        {k: p[k] for k in ("name", "label", "kind", "required", "default", "choices") if k in p}
+        for p in params
+    ]
     if len(params) > MAX_PARAMS:
         # Required parameters first, so truncation never drops one.
         params.sort(key=lambda p: not p.get("required"))
         skipped += [p["name"] for p in params[MAX_PARAMS:]]
         params = params[:MAX_PARAMS]
-
     return {
         "module": module,
         "summary": label,
@@ -392,6 +423,65 @@ def parse(xml_text):
         "params": params,
         "skipped": skipped,
     }
+
+
+def form_fields(xml_text):
+    """Return a module's parameters as a panel form's fields.
+
+    The input, output and layer parameters a module's caller names are left
+    out, as are rasters and database tables the plugin cannot pass; what
+    remains is what a user can choose. A ``multiple`` choice becomes a
+    ``multi`` field (several of its choices), any other choice a ``select``, a
+    flag a ``checkbox``, a number a ``number`` (whole numbers marked
+    ``integer``) and everything else ``text``.
+
+    :raises ValueError: when the document is not a GRASS task description
+    """
+    _, _, _, params, _ = _specs(xml_text)
+    out = []
+    for spec in params[:MAX_FORM_FIELDS]:
+        kind = {
+            "bool": "checkbox",
+            "choice": "multi" if spec["multiple"] else "select",
+            "number": "number",
+            "text": "text",
+            "file": "text",
+            "field": "text",
+            "vectorLayer": "text",
+        }.get(spec["kind"])
+        if kind is None:
+            continue
+        field = {
+            "id": spec["name"],
+            "kind": kind,
+            "label": _clip(spec["label"], 200),
+        }
+        if spec.get("help"):
+            field["help"] = _clip(spec["help"], 2000)
+        if spec.get("required"):
+            field["required"] = True
+        if spec.get("integer") and kind == "number":
+            field["integer"] = True
+        if kind in ("select", "multi"):
+            field["choices"] = spec["choices"][:256]
+        default = spec.get("default")
+        if default is not None and kind != "checkbox":
+            if kind == "multi":
+                parts = default.split(",") if isinstance(default, str) else default
+                picked = [str(p).strip() for p in parts if str(p).strip() in spec["choices"]]
+                if picked:
+                    field["default"] = picked
+            elif kind == "select" and default in spec["choices"]:
+                field["default"] = default
+            elif kind in ("number", "text"):
+                field["default"] = default
+        out.append(field)
+    return out
+
+
+def _clip(text, limit):
+    """Keep a field's label or help within what RustGIS allows."""
+    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 def _is_number(text):

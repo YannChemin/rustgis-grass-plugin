@@ -337,7 +337,7 @@ def run_module(req, module=None):
     values = (req.get("panel") or {}).get("values") or {}
     catalogue = load_catalogue().get("catalogue") or []
     entry = raster.entry_for(catalogue, module or values.get("modules"))
-    argv = raster.free_module_args(entry)
+    argv = raster.free_module_args(entry) + raster.form_args(entry, values.get("form"))
 
     layers = call("host.layers") or []
     layer = raster.choose_raster(layers, values.get("raster"))
@@ -373,6 +373,7 @@ def run_module(req, module=None):
             "items": {
                 "modules": {"nodes": nodes},
                 "details": {"text": raster.module_details(entry)},
+                "form": {"fields": raster.form_of(entry)},
                 "status": {"text": "\n".join(messages)},
             }
         },
@@ -553,6 +554,7 @@ def panel_state(req, mode=None):
                 "mode": {"nodes": raster.mode_nodes(catalogue)},
                 "modules": {"nodes": module_nodes},
                 "details": {"text": raster.module_details(chosen_module)},
+                "form": {"fields": raster.form_of(chosen_module)},
                 **database_panel(values.get("database")),
             },
         }

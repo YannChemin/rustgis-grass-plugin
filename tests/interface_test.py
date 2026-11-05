@@ -124,6 +124,57 @@ def test_keeps_choices_and_defaults(form):
     assert distance["default"] == 25.5
 
 
+def test_form_fields_leave_out_what_the_panel_names():
+    fields = interface.form_fields(TASK)
+    by = {f["id"]: f for f in fields}
+    assert "input" not in by and "output" not in by
+    assert "elevation" not in by and "rmsfile" not in by and "table" not in by
+    assert by["helper"]["kind"] == "text", "a vector layer the form cannot pass is typed"
+    assert by["rules"]["kind"] == "text"
+    assert by["label"]["kind"] == "text"
+    assert by["distance"]["kind"] == "number"
+    assert by["distance"]["default"] == 25.5
+    assert by["method"]["kind"] == "select"
+    assert by["method"]["choices"] == ["fast", "careful"]
+    assert by["method"]["default"] == "fast"
+    assert by["flag_t"]["kind"] == "checkbox"
+    assert "flag_overwrite" not in by
+
+
+def test_form_fields_keep_multiple_choices_and_whole_numbers():
+    xml = """<task name="t.example">
+      <parameter name="variables" type="string" required="yes" multiple="yes">
+        <description>Which ones</description>
+        <values><value><name>a</name></value><value><name>b</name></value></values>
+      </parameter>
+      <parameter name="levels" type="integer" required="no" multiple="yes">
+        <values><value><name>500</name></value><value><name>850</name></value></values>
+      </parameter>
+      <parameter name="count" type="integer" required="no">
+        <default>3</default>
+      </parameter>
+    </task>"""
+    by = {f["id"]: f for f in interface.form_fields(xml)}
+    assert by["variables"]["kind"] == "multi"
+    assert by["variables"]["choices"] == ["a", "b"]
+    assert by["levels"]["kind"] == "multi"
+    assert by["count"]["kind"] == "number"
+    assert by["count"]["integer"] is True
+    assert by["count"]["default"] == 3.0
+
+
+def test_form_fields_carry_a_separate_label_and_help():
+    xml = """<task name="r.example">
+      <parameter name="size" type="float" required="no">
+        <label>Window size</label>
+        <description>The size of the moving window, in cells.</description>
+      </parameter>
+    </task>"""
+    field = interface.form_fields(xml)[0]
+    assert field["label"] == "Window size"
+    assert field["help"] == "The size of the moving window, in cells."
+
+
 ALPHABET = "abcdefghijklmnopqrstuvwxyz"
 
 
@@ -536,6 +587,7 @@ def test_the_panel_keeps_an_imagery_mode_and_filters_the_module_tree(monkeypatch
             "needs": [],
             "bands": False,
             "temporal": False,
+            "form": [{"id": "n", "kind": "number", "integer": True}],
         }
     ]
     monkeypatch.setattr(main, "load_catalogue", lambda: {"catalogue": catalogue})
@@ -548,7 +600,10 @@ def test_the_panel_keeps_an_imagery_mode_and_filters_the_module_tree(monkeypatch
         return {}
 
     monkeypatch.setattr(main, "call", fake_call)
-    state = main.panel_state({"panel": {"values": {"raster": "1"}}}, "mode/imagery")
+    state = main.panel_state(
+        {"panel": {"values": {"raster": "1", "modules": "all/i.edge"}}},
+        "mode/imagery",
+    )
     assert state["panel"]["values"]["mode"] == "mode/imagery"
     assert state["panel"]["items"]["mode"]["nodes"] == [
         {"id": "mode/all", "label": "All modules", "count": 1},
@@ -560,6 +615,9 @@ def test_the_panel_keeps_an_imagery_mode_and_filters_the_module_tree(monkeypatch
         == "All imagery modules (1)"
     )
     assert "Showing imagery modules only." in state["panel"]["items"]["status"]["text"]
+    assert state["panel"]["items"]["form"]["fields"] == [
+        {"id": "n", "kind": "number", "integer": True}
+    ]
 
 
 def test_the_temporal_state_command_opens_the_temporal_mode(monkeypatch):
