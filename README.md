@@ -15,7 +15,8 @@ Above is the plugin's own **GRASS** ribbon tab: **Database** opens the GRASS dat
 adds a map from it, **Region** sets the computational region from the map view or a layer,
 **Raster** runs slope, aspect and viewshed or the common raster modules in menus, **Imagery**
 does the same for the imagery modules, **Vector** holds the generated tools, grouped by what
-they do, and **Modules** opens the panel and its **Run Module**.
+they do, **Temporal** opens the temporal module catalogue, and **Modules** opens the panel and
+its **Run Module**.
 
 GRASS is not bundled, linked or copied here. Each run spawns the `grass` launcher already
 installed on the machine, and every tool's form is read from that installation at build time with
@@ -25,14 +26,14 @@ Apache-2.0 GIS this way.
 
 ## What it offers
 
-Everything the installation has. On this machine that is **1,180 modules**, addons included, of
-which **1,175** could describe themselves:
+Everything the installation has. On this machine that is **1,181 modules**, addons included, of
+which **1,176** could describe themselves:
 
 | Family | Modules | Family | Modules |
 |---|---|---|---|
 | Raster (`r.*`) | 455 | General (`g.*`) | 55 |
 | Vector (`v.*`) | 223 | Display (`d.*`) | 49 |
-| Imagery (`i.*`) | 176 | 3D Raster (`r3.*`) | 35 |
+| Imagery (`i.*`) | 177 | 3D Raster (`r3.*`) | 35 |
 | Temporal (`t.*`) | 74 | Database (`db.*`) | 22 |
 | Planetary (`p.*`) | 67 | Miscellaneous (`m.*`) | 14 |
 | Tests (`test.*`) | 4 | PostScript (`ps.*`) | 1 |
@@ -43,18 +44,20 @@ They are reached three ways, because the ABI gives three and each has a ceiling:
 |---|---|---|
 | **Tools**, with a generated form in the Tools pane | 64 vector modules | a manifest holds **64 tools**, and a tool takes no raster, so only vector modules qualify: 128 do, half of them fit |
 | **Commands** on the ribbon | Slope, Aspect, Viewshed, **18 common raster modules** and **7 imagery modules** in menus by theme, the region and the database | a manifest holds up to **256 commands**, and a command opens no dialog, so each needs the panel to be told anything |
-| **Run Module**, from the panel's tree | **all 1,175**, of which the **88** that read one raster and write one, with no second required raster, band set or display and every other required parameter defaulted, can be run | a command has no form, so only the input and the output are named; everything else is GRASS's default |
+| **Run Module**, from the panel's tree | **all 1,176**, of which the **88** that read one raster and write one, with no second required raster, band set or display and every other required parameter defaulted, can be run | a command has no form, so only the input and the output are named; everything else is GRASS's default |
 
 The tree is searchable and has three branches: **Runs from here** (the 88), **All modules**
 (every module, with the reason the others need a form) and **Recently run**. A **Catalogue**
-tree above it keeps either all modules or only the imagery (`i.*`) ones, and the **Imagery
-Modules** ribbon button turns that filter on. A module Run Module can drive is marked with
+tree above it keeps all modules, only the imagery (`i.*`) ones, or only the temporal (`t.*`)
+ones; the **Imagery Modules** and **Temporal Modules** ribbon buttons turn those filters on.
+None of the 74 temporal modules can run from one raster, because they read a space-time
+dataset, and the tree says so for each. A module Run Module can drive is marked with
 **▸**; the others carry their reason, such as *needs several bands* or *needs an imagery
 group*, and choosing one says what it reads and writes in the **Chosen module** text before
 Run Module is pressed. The 64 modules that could have been tools but did not fit are listed in
 `modules.json` under `toolsLeftOut`, as are the five that could not be read at all.
 
-So "every GRASS module" is true for *reaching* them and false for *forms*: 64 of 1,175 get one.
+So "every GRASS module" is true for *reaching* them and false for *forms*: 64 of 1,176 get one.
 That gap is the ABI's, not GRASS's, and it is what a crate in the RustGIS tree would close.
 
 ### Its own tab
@@ -69,6 +72,7 @@ against a documented limit of 16:
 | Raster | Slope, Aspect, Viewshed, and menus of raster modules: Terrain, Hydrology, Filters, Surfaces, Sun |
 | Imagery | the panel, Imagery Modules, and menus of imagery modules: Enhance, Preprocess, Detect, Geometry |
 | Vector | the 64 tools, in menus by GRASS keyword (Proximity, Geometry, Network, LIDAR…) |
+| Temporal | the panel and Temporal Modules, which filters the catalogue to the temporal (`t.*`) modules |
 | Modules | the panel, All Modules, and Run Module |
 
 ### What of RustGIS it uses
@@ -80,8 +84,8 @@ Everything the plugin ABI offers that a GRASS bridge can make use of, as of Rust
 | `tools` with a generated form | 64 vector modules, with their GRASS parameters, flags and choices |
 | `file` tool parameters | the rules, node and control-point files of `v.segment`, `v.net`, `v.extract`, `v.rectify`, `v.lrs.segment` |
 | `tables` beside `layers` in a tool's result | rows a module writes without geometry |
-| `commands` (up to 256) | the shaped slope/aspect/viewshed runs, 18 common raster modules, 7 imagery modules, the region and the database |
-| a `tab` of its own, with compact columns and nested menus | the GRASS tab: Database, Region, Raster and Imagery (with menus by theme), Vector (menus by GRASS keyword), Modules |
+| `commands` (up to 256) | the shaped slope/aspect/viewshed runs, 18 common raster modules, 7 imagery modules, the region, the database and the catalogue-mode buttons |
+| a `tab` of its own, with compact columns and nested menus | the GRASS tab: Database, Region, Raster and Imagery (with menus by theme), Vector (menus by GRASS keyword), Temporal, Modules |
 | a `panel`, with `tree` widgets that search | the GRASS database, the map's rasters, the band, the catalogue mode, the module tree with its three branches, and the chosen module's details |
 | `raster.info` | refusing a raster with no coordinate system, describing the source, and sizing the band slider |
 | `share.exportRaster`'s answer | saying when a run was made on a downsampled overview |
@@ -100,7 +104,7 @@ parameters per tool.
 From the package, on Debian or Ubuntu:
 
 ```sh
-sudo apt install ./dist/rustgis-grass-plugin_0.6.0_all.deb
+sudo apt install ./dist/rustgis-grass-plugin_0.7.0_all.deb
 rustgis-grass-setup          # once per user; again after upgrading GRASS
 ```
 
@@ -270,7 +274,7 @@ what RustGIS would not take rather than offering something that cannot work: a r
 a name with a digit in it (`v.gsflow.segments` has `width1`), a name the module declares twice
 (the same module declares four of them twice over), and a file the module writes although it
 declares it as one it reads (`v.rectify`'s `rmsfile`), since a file picker cannot name a file
-that does not exist yet. Reading all 1,180 forms takes about three and
+that does not exist yet. Reading all 1,181 forms takes about three and
 a half minutes, 24 at a time.
 
 ## Watch out

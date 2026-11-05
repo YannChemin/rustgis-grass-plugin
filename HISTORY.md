@@ -234,11 +234,49 @@ Result: **89 tests pass**. `make check` passes under the Debian build as well.
 - Version bumped `0.5.0` → `0.6.0`, with a new `debian/changelog` entry, the
   man page date and version, and the `.gitignore` release exception.
 
+### 8. Temporal group and catalogue mode
+
+- `grass_bridge/raster.py`:
+  - `MODE_FAMILIES` gains `mode/temporal` → `Temporal`, so
+    `mode_family("mode/temporal")` resolves it;
+  - `mode_nodes(catalogue)` now returns All modules, Imagery and Temporal with
+    their counts.
+- `generate_manifest.py`:
+  - a new `temporal-state` command (ribbon label **Temporal Modules**) opens the
+    panel in the temporal mode;
+  - a new Temporal ribbon group holds the panel and Temporal Modules, between
+    Vector and Modules;
+  - the panel's Catalogue and module-tree help, plus the panel help, name the
+    temporal filter; French strings for Temporal and Temporal Modules.
+- `main.py`: `temporal-state` calls `panel_state(req, "mode/temporal")`, as
+  `imagery-state` and `all-state` do for their modes.
+- No temporal module is offered as runnable. All 74 report **takes no raster**
+  (66) or **writes no raster** (8); the details text already says a temporal
+  module reads a space-time dataset, not one raster.
+- Tests: temporal family filtering, the temporal mode in `mode_nodes`, and the
+  `temporal-state` dispatch. **95 tests pass**.
+- Version bumped `0.6.0` → `0.7.0`, with a new `debian/changelog` entry, the man
+  page date and version, the `.gitignore` release exception and the README
+  install line.
+- Catalogue refreshed while building: 1,181 installed, 1,176 readable (Imagery
+  is now 177). The manifest carries 38 commands, 64 tools, 7 ribbon groups and
+  23 panel items.
+
+#### Space-time design note
+
+Temporal modules act on a space-time raster dataset (STRDS), not on one map.
+Running one would mean exporting the chosen layer into the throwaway GRASS
+project, creating an STRDS there, registering the map, running the module and
+exporting its raster result — and a one-map STRDS would make most `t.rast.*`
+operations trivial. The plugin ABI has no space-time dataset kind and RustGIS
+holds no temporal model, so this is left as a separate TODO rather than
+pretended in the panel.
+
 ## Verification
 
-- `python3 -m pytest -q tests` → 93 passed.
+- `python3 -m pytest -q tests` → 95 passed.
 - `rustgis-cli commands --plugin . --no-plugins` loaded the generated manifest
-  successfully and listed all 37 commands.
+  successfully and listed all 38 commands.
 - `rustgis-cli run --plugin . --no-plugins` with `raster-state` produced the
   three-branch tree and the "Choose a module" details text.
 - Full end-to-end run on `crates/map/testdata/qgis/generated/data/dem.tif`:
@@ -252,14 +290,15 @@ Result: **89 tests pass**. `make check` passes under the Debian build as well.
 
 ## Key numbers
 
-- 1,175 modules read; 5 could not be read.
+- 1,176 modules read; 5 could not be read.
 - 64 vector tools; 64 more could have fit.
 - 18 curated raster commands and 7 curated imagery commands (raster was 27
   before the runnability work).
 - 88 modules runnable via Run Module: Raster 70, Imagery 9, Planetary 9.
 - 23 panel items (limit 32).
-- 37 commands, 64 tools, 6 ribbon groups.
-- Tree size about 1,300 nodes (limit 5,000); the Imagery mode holds 176.
+- 38 commands, 64 tools, 7 ribbon groups.
+- Tree size about 1,300 nodes (limit 5,000); the Imagery mode holds 177 and
+  the Temporal mode 74.
 
 ## Files changed
 
@@ -269,18 +308,18 @@ Result: **89 tests pass**. `make check` passes under the Debian build as well.
   `remember` / `read_recents`, `free_module_args`, `mode_nodes` /
   `mode_family`.
 - `generate_manifest.py` — catalogue fields, runnable-only commands, version,
-  panel/tab groups, imagery commands and mode, i18n.
-- `main.py` — tree, details and recents wiring, catalogue mode and its
-  commands.
+  panel/tab groups, imagery and temporal commands and modes, i18n.
+- `main.py` — tree, details and recents wiring, catalogue modes and their
+  commands (`imagery-state`, `temporal-state`, `all-state`).
 - `README.md`, `skills/grass/SKILL.md`, `debian/changelog`,
   `man/rustgis-grass-setup.1`.
 - `tests/interface_test.py`, `tests/raster_test.py`.
 - `.gitignore`, `debian/changelog`, `man/rustgis-grass-setup.1`,
-  `dist/rustgis-grass-plugin_0.6.0_all.deb`.
+  `dist/rustgis-grass-plugin_0.7.0_all.deb`.
 
 ## Possible next steps
 
-- Add a Temporal group/mode once space-time dataset handling is designed.
+- Run temporal modules once space-time dataset handling is designed.
 - Consider a lighter `module-details` command so selecting a module does not
   re-send the full tree.
 - Replace the two-minute command cap or amortise GRASS project creation for

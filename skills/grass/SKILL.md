@@ -70,8 +70,11 @@ on the file and add the result back.
   running `run-module`. The tree has three branches: **Runs from here** (the modules
   Run Module can drive), **All modules** (every installed module, with the reason the
   others cannot be driven) and **Recently run**. The panel's **Catalogue** tree keeps
-  all modules or only the imagery ones; `imagery-state` turns that filter on and
-  `all-state` turns it off. A leading triangle **▸** marks a module Run Module can
+  all modules, only the imagery ones, or only the temporal ones; `imagery-state` and
+  `temporal-state` turn those filters on and `all-state` turns them off. No temporal
+  module can run from one raster (they read a space-time dataset), so the Temporal
+  mode is a catalogue: each `t.*` module carries the reason it cannot be driven here.
+  A leading triangle **▸** marks a module Run Module can
   drive; the others carry their reason, such as *needs several bands*, *needs an
   imagery group* or *needs a display*, so tell the user what the module needs instead
   of offering a run that would fail.

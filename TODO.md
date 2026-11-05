@@ -312,12 +312,47 @@ entry, `man/rustgis-grass-setup.1` is bumped, the README installs the new
 package, and `.gitignore` points its release exception at
 `dist/rustgis-grass-plugin_0.6.0_all.deb`.
 
+## 11. Temporal group and catalogue mode
+
+### DONE — Add the temporal mode
+
+`MODE_FAMILIES` in `grass_bridge/raster.py` gains `mode/temporal` → `Temporal`.
+`mode_nodes()` now lists All modules, Imagery and Temporal with their counts,
+so the panel's Catalogue tree can show the 74 `t.*` modules.
+
+### DONE — Add the Temporal ribbon group and command
+
+A new `temporal-state` command opens the panel in the temporal mode, as
+`imagery-state` does for imagery. The new Temporal ribbon group (between Vector
+and Modules) holds the panel and Temporal Modules. The panel and module-tree
+help, and the French strings, name the temporal filter.
+
+### DONE — Keep the temporal catalogue honest
+
+No temporal module is offered as runnable, because a temporal module reads a
+space-time dataset rather than one raster. The catalogue reports 66 as
+**takes no raster** and 8 as **writes no raster**, and the details text already
+explains that a temporal module reads a space-time dataset, not one raster.
+
+### DONE — Test, document and package 0.7.0
+
+Tests cover temporal family filtering, the temporal mode in `mode_nodes`, and
+the `temporal-state` dispatch. `python3 -m pytest -q tests` passes 95 tests.
+README, SKILL and HISTORY describe the Temporal group and mode. `plugin.json`
+is version `0.7.0`; `debian/changelog`, the man page, the README install line
+and the `.gitignore` exception point at the `0.7.0` package. The refreshed
+catalogue has 1,181 installed / 1,176 readable modules, 38 commands, 64 tools,
+7 ribbon groups and 23 panel items.
+
 ## Remaining work
 
-### TODO — Add a Temporal group and mode
+### TODO — Run temporal modules from a space-time dataset
 
-Design space-time dataset handling first, then add a Temporal group and mode.
-No temporal module currently runs from one raster.
+A temporal module needs an STRDS, not one raster. A real implementation would
+export the chosen layer into the throwaway GRASS project, create and register
+an STRDS, run the module and export its raster result; a one-map STRDS would
+make most `t.rast.*` operations trivial, and the plugin ABI has no space-time
+dataset kind. Design this before offering any `t.*` command.
 
 ### TODO — Consider a lightweight `module-details` command
 
@@ -333,6 +368,6 @@ would make large runs practical.
 
 ### TODO — Refresh the screenshot
 
-`plugin_grassgis_030.png` predates the Modules group, the three-branch tree
-and the details text. A new screenshot would show the current ribbon and
-panel.
+`plugin_grassgis_030.png` predates the Imagery and Temporal groups, the
+three-branch tree, the catalogue modes and the details text. A new screenshot
+would show the current ribbon and panel.

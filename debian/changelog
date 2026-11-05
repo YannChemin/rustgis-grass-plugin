@@ -1,3 +1,19 @@
+rustgis-grass-plugin (0.7.0) unstable; urgency=medium
+
+  * The panel's catalogue gains a Temporal mode. The mode tree now lists All
+    modules, Imagery and Temporal with their counts, and the temporal mode
+    shows only the 74 t.* modules.
+  * A new Temporal ribbon group, between Vector and Modules, holds the panel
+    and a Temporal Modules button that opens that mode. This is a catalogue,
+    not a runner: a temporal module reads a space-time dataset rather than one
+    raster, so every t.* module keeps its reason in the tree instead of
+    offering a run that would fail.
+  * The manifest now carries 38 commands, 64 tools, 7 ribbon groups and 23
+    panel items, against 1,176 readable modules on this machine. The manifest's
+    version is 0.7.0.
+
+ -- Yann Chemin <dr.yann.chemin@gmail.com>  Thu, 05 Nov 2026 10:00:00 +0100
+
 rustgis-grass-plugin (0.6.0) unstable; urgency=medium
 
   * The panel's module catalogue has a mode tree: All modules or Imagery. The
