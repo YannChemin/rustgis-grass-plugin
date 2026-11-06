@@ -234,6 +234,24 @@ def test_a_mapset_or_a_map_both_say_which_mapset_to_open():
     assert database.opened(None) is None
 
 
+def test_a_chosen_mapset_is_checked_before_a_module_writes_there(tmp_path):
+    base = tmp_path
+    (base / "P" / "PERMANENT").mkdir(parents=True)
+    (base / "P" / "PERMANENT" / "WIND").write_text("")
+    assert database.chosen_mapset(str(base), "mapset/P/PERMANENT") == (
+        "P",
+        "PERMANENT",
+    )
+    assert database.chosen_mapset(str(base), "raster/P/PERMANENT/dem") == (
+        "P",
+        "PERMANENT",
+    )
+    assert database.chosen_mapset(str(base), "mapset/../PERMANENT") is None
+    assert database.chosen_mapset(str(base), "mapset/P/NOPE") is None
+    assert database.chosen_mapset(str(base), "project/P") is None
+    assert database.chosen_mapset(str(base), None) is None
+
+
 def fake_database(root, layout):
     """Write a GRASS database of empty maps and return its path."""
     for project, mapsets_ in layout.items():
@@ -498,7 +516,7 @@ def test_the_recent_branch_is_present_before_anything_has_run():
 
 
 def test_the_tree_says_when_the_chosen_module_cannot_run():
-    nodes, notes = raster.catalogue_tree(
+    _nodes, notes = raster.catalogue_tree(
         [entry("i.pca", "Imagery", False, reason="needs several bands")],
         "all/i.pca",
     )
@@ -568,6 +586,73 @@ def test_form_args_name_flags_choices_multiples_and_numbers():
     assert raster.form_args(entry, {"method": "nope", "label": ""}) == []
     assert raster.form_args(entry, {"vars": "a,b"}) == ["vars=a,b"]
     assert raster.form_args(entry, None) == []
+
+
+def test_missing_form_values_names_only_what_has_no_default_or_value():
+    entry = {
+        "module": "t.in.era5",
+        "form": [
+            {"id": "variables", "kind": "multi", "required": True, "choices": ["t2m"]},
+            {"id": "start", "kind": "text", "required": True},
+            {"id": "prefix", "kind": "text", "required": True, "default": "era5"},
+            {"id": "flag_c", "kind": "checkbox", "required": True},
+            {"id": "levels", "kind": "number", "required": True, "integer": True},
+        ],
+    }
+    assert raster.missing_form_values(entry, {}) == [
+        "variables",
+        "start",
+        "flag_c",
+        "levels",
+    ]
+    assert raster.missing_form_values(
+        entry,
+        {
+            "variables": ["t2m"],
+            "start": "2020-01-01",
+            "flag_c": True,
+            "levels": 3,
+        },
+    ) == []
+    assert raster.missing_form_values(
+        entry,
+        {
+            "variables": ["nope"],
+            "start": " ",
+            "flag_c": False,
+            "levels": 3.5,
+        },
+    ) == ["variables", "start", "flag_c", "levels"]
+
+
+def test_a_mapset_module_is_marked_before_its_summary_is_clipped():
+    label = raster._module_label(
+        entry(
+            "t.in.era5",
+            "Temporal",
+            False,
+            mapset_runnable=True,
+            mapset_reason="",
+            summary="A summary long enough to clip later.",
+        )
+    )
+    assert label.startswith("▸ t.in.era5 [in a chosen mapset] — ")
+
+
+def test_the_details_text_says_a_mapset_module_runs_in_a_chosen_mapset():
+    details = raster.module_details(
+        entry(
+            "t.in.era5",
+            "Temporal",
+            False,
+            mapset_runnable=True,
+            mapset_reason="",
+            reason="takes no raster",
+        )
+    )
+    assert "Runs here in a GRASS mapset" in details
+    assert "Projects and mapsets" in details
+    assert "Not runnable from this panel" not in details
 
 
 def test_run_module_refuses_a_module_it_cannot_drive_and_says_why():

@@ -196,6 +196,28 @@ def opened(node):
     return None
 
 
+def chosen_mapset(base, node):
+    """Return the ``(project, mapset)`` a chosen node names, if it is a mapset.
+
+    A node naming a map (``raster/Project/MAPSET/name``) also answers with its
+    mapset, so a run writes beside the map the user was looking at. Names are
+    checked to be one folder each, so a crafted node cannot walk out of the
+    database.
+
+    :return: ``(project, mapset)``, or None when the node names no mapset
+    """
+    found = opened(node)
+    if not found:
+        return None
+    for part in found:
+        if part in ("", ".", "..") or SEP in part or "\\" in part:
+            return None
+    project, mapset = found
+    if not os.path.isfile(os.path.join(base, project, mapset, "WIND")):
+        return None
+    return found
+
+
 def _size(count):
     """Return a byte count a reader can take in at a glance."""
     for unit in ("bytes", "kB", "MB", "GB"):

@@ -317,6 +317,54 @@ pretended in the panel.
 - `.gitignore`, `debian/changelog`, `man/rustgis-grass-setup.1`,
   `dist/rustgis-grass-plugin_0.7.0_all.deb`.
 
+## This session — form-driven mapset runs (0.9.0)
+
+### Objective
+
+Let a module the form can describe actually run when it does not read one raster
+and write another. `t.in.era5` was the case that exposed it: the form showed its
+variables, dates and prefix, but Run Module answered "takes no raster", so the
+import could never start.
+
+### What changed
+
+- `interface._mapset_runnability()` marks a module whose family is Temporal,
+  Database, General or Miscellaneous, and whose required parameters are all
+  either form fields or defaulted, as runnable in a chosen mapset. A required
+  raster, space-time dataset, vector, table or output name the form cannot name
+  keeps its reason. Result: 91 more modules run from the form (179 in all).
+- The catalogue carries `mapset_runnable` and `mapset_reason`; the tree marks
+  these with **▸** and `[in a chosen mapset]`, and the details text says to pick
+  a project/mapset under **Projects and mapsets**.
+- `main.run_module_in_mapset()` validates the chosen mapset, checks required
+  form fields (`raster.missing_form_values`), builds the arguments with
+  `form_args`, and runs `session.Run.mapset_module()` in that mapset. Nothing is
+  copied to a throwaway mapset, so an imported dataset stays.
+- `database.chosen_mapset()` accepts a mapset or a map node and rejects `..`,
+  separators and a folder without `WIND`.
+- `main.run_module()` refuses a module that is neither runnable on the chosen
+  raster nor mapset-runnable, stating the catalogue's reason, instead of trying
+  it on the raster anyway.
+- Created datasets are named by the module's own prefix parameter (t.in.era5's
+  `output_prefix`); no required output name is invented.
+- A module command may now declare `"timeout"` seconds (1 to 86400) in
+  `plugin.json`; `run-module` declares 86400, because a download does not fit
+  the two minutes a command normally gets. `process::call` uses it through
+  `call_with_timeout`. The host docs and validation are updated.
+- `i.pca`'s `keys`/range fix and the form are unchanged; the generator now
+  prints the mapset count, and `plugin.json` is 64 tools, 38 commands, 7 groups,
+  24 panel items, 1,176 catalogue entries, version 0.9.0.
+
+### Verification
+
+- `make check`: 110 tests pass (interface, raster, database, mapset run, form
+  validation and the refusal), and `ruff check` is clean.
+- `cargo test -p rustgis-plugins`: 40 pass, 2 ignored, including
+  `command_timeouts_are_bounded`.
+- Generated manifest: 88 raster modules, 91 mapset modules, 1,176 forms.
+- Real smoke test in a throwaway GRASS database: `g.region -p` runs in a chosen
+  mapset, and `r.mapcalc` writes a raster there.
+
 ## This session — the chosen module's form (0.8.0)
 
 ### Objective

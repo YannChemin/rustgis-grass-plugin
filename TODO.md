@@ -404,20 +404,26 @@ Selecting a module currently re-runs `raster-state`, which re-sends the full
 ~1,300-node tree. A dedicated command could return only the details text and
 keep selection cheap, at the cost of one more command.
 
-### TODO — Improve the two-minute cap
+### PARTLY DONE — The two-minute cap
 
-RustGIS stops a plugin command after two minutes. Large rasters may need the
-region narrowed first; amortising GRASS project creation or raising the cap
-would make large runs practical.
+A command may now declare `"timeout"` in `plugin.json`; `run-module` asks for a
+day, so `t.in.era5` is not cut off. Raster runs still use the two-minute
+default, because they copy the whole layer through a temporary project: narrow
+the region first, or give the curated raster commands a longer timeout once
+their progress is reported.
 
-### TODO — Let the form make more modules runnable
+### PARTLY DONE — Let the form make more modules runnable
 
-Runnability is still decided without the form: a module with a required
-parameter or flag the form can fill is marked as not runnable and cannot be
-chosen for a run. With the form, some of those could run once the user fills
-what is required: the rule would need to say which requirements are reachable
-from the form and which name a raster, table or group the panel cannot pass,
-and `run-module` would need to check the form is complete before running.
+Done for temporal, database and general modules whose required parameters are
+form fields or defaulted: 91 more run, each in the project/mapset chosen under
+Projects and mapsets, and `run-module` now checks required fields first.
+Still open:
+- A required space-time dataset, raster or vector the form cannot name still
+  blocks the module (t.rast.aggregate, t.rast.series). Offer the datasets from
+  the chosen mapset in the form, or a second tree feed.
+- A required output name is not invented; modules such as `v.in.ogr` cannot run
+  until the form offers output names or the bridge names them.
+- Raster modules that need several rasters or bands remain commands only.
 
 ### TODO — Refresh the screenshot
 

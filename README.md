@@ -44,17 +44,20 @@ They are reached three ways, because the ABI gives three and each has a ceiling:
 |---|---|---|
 | **Tools**, with a generated form in the Tools pane | 64 vector modules | a manifest holds **64 tools**, and a tool takes no raster, so only vector modules qualify: 128 do, half of them fit |
 | **Commands** on the ribbon | Slope, Aspect, Viewshed, **18 common raster modules** and **7 imagery modules** in menus by theme, the region and the database | a manifest holds up to **256 commands**, and a command opens no dialog, so each needs the panel to be told anything |
-| **Run Module**, from the panel's tree | **all 1,176** are reached and show their parameters; the **88** that read one raster and write one, with no second required raster, band set or display, can be run | a command has no form of its own, so the panel's **Module parameters** form sends the values it holds; the other **1,088** still need an input or output the panel cannot supply |
+| **Run Module**, from the panel's tree | **all 1,176** are reached and show their parameters; the **88** that read one raster and write one, plus **91** temporal, database and general modules whose form is all they need, can be run | a command has no form of its own, so the panel's **Module parameters** form sends the values it holds; the rest still need a raster, vector or dataset the form cannot name |
 
-The tree is searchable and has three branches: **Runs from here** (the 88), **All modules**
+The tree is searchable and has three branches: **Runs from here** (the 179), **All modules**
 (every module, with its reason for not running here) and **Recently run**. A **Catalogue**
 tree above it keeps all modules, only the imagery (`i.*`) ones, or only the temporal (`t.*`)
 ones; the **Imagery Modules** and **Temporal Modules** ribbon buttons turn those filters on.
-None of the 74 temporal modules can run from one raster, because they read a space-time
-dataset, and the tree says so for each. A module Run Module can drive is marked with
-**▸**; the others carry their reason, such as *needs several bands* or *needs an imagery
-group*, and choosing one says what it reads and writes in the **Chosen module** text before
-Run Module is pressed. The 64 modules that could have been tools but did not fit are listed in
+A temporal, database or general module does not read one raster and write another: it
+imports a dataset or changes the project it runs in. Those run from the form, writing into
+the project and mapset chosen under **Projects and mapsets** (so `t.in.era5` can download a
+variable straight into a mapset); one whose required parameter names a space-time dataset
+or a raster the form cannot set keeps its reason. A module Run Module can drive is marked
+with **▸**; the others carry their reason, such as *needs several bands* or *needs an
+imagery group*, and choosing one says what it reads and writes in the **Chosen module**
+text before Run Module is pressed. The 64 modules that could have been tools but did not fit are listed in
 `modules.json` under `toolsLeftOut`, as are the five that could not be read at all.
 
 Choosing a module also fills the **Module parameters** form with that module's own parameters,
@@ -68,8 +71,9 @@ keeps the values of fields with the same name and starts the new ones at their d
 
 So "every GRASS module" is true for *reaching* them and for *showing their parameters*: 1,176
 forms are generated from the installation. It is false for *running* them from the panel: the
-same 88 can run, and the rest still need inputs or outputs a command cannot supply. The 64-tool
-form budget is the ABI's; the panel's form has no such budget.
+88 raster ones run on the chosen layer, 91 temporal, database and general ones run with their
+form in a chosen mapset, and the rest still need inputs or outputs a command cannot supply.
+The 64-tool form budget is the ABI's; the panel's form has no such budget.
 
 ### Its own tab
 
@@ -115,7 +119,7 @@ parameters per tool.
 From the package, on Debian or Ubuntu:
 
 ```sh
-sudo apt install ./dist/rustgis-grass-plugin_0.8.0_all.deb
+sudo apt install ./dist/rustgis-grass-plugin_0.9.0_all.deb
 rustgis-grass-setup          # once per user; again after upgrading GRASS
 ```
 
@@ -219,13 +223,16 @@ finds it: `GISDBASE` when set, otherwise the `GISDBASE:` line of `~/.grass8/rc`,
 | Open the panel | Projects and mapsets are read from the file system — a project is a folder with a PERMANENT mapset, a mapset one with a `WIND` file. 51 projects, 35,241 maps, in 0.03 s |
 | Choose a mapset | Its maps are listed: `cellhd` entries are rasters, `vector` folders are vectors. They load only then, because 35,000 maps do not fit a tree that takes 5,000 nodes |
 | Choose a map, then **Add Map** | It is exported and added to the project: a raster as a GeoTIFF, a vector as a GeoPackage, both of which carry the coordinate system |
+| Choose a mapset, then **Run Module** | A temporal, database or general module runs in that mapset, so what it writes outlives the run: `t.in.era5` imports its space-time dataset there |
 | **GRASS Database** | Puts the database folder in the browser's **Folders** (`project.addFolder`) |
 
 The status bar reports each one — *GRASS GIS Tools: forest_ndvi@PERMANENT added from IGN.*
 
 Exporting runs in a **throwaway mapset of that project** (`grass --tmp-mapset`), reading the map
 across mapsets as `name@mapset`. Nothing of the user's is written to, their own mapsets are never
-locked, and a GRASS session they have open elsewhere is undisturbed.
+locked, and a GRASS session they have open elsewhere is undisturbed. A **Run Module** for a
+temporal, database or general module is the exception: it runs in the chosen mapset, because
+the dataset it makes is meant to stay there.
 
 Two things the host decides, not the plugin:
 

@@ -70,12 +70,15 @@ on the file and add the result back.
   or accepting its **Module parameters** form, and running `run-module`. The tree has
   three branches: **Runs from here** (the modules Run Module can drive), **All modules**
   (every installed module, with the reason the others cannot be driven) and **Recently
-  run**. Any readable module shows its parameters in the form, but only the 88 that read
-  one raster and write one can run here. The panel's **Catalogue** tree keeps
+  run**. Any readable module shows its parameters in the form. The 88 that read one
+  raster and write one run on the chosen layer; 91 temporal, database and general
+  modules run with the form in the GRASS project/mapset chosen under **Projects and
+  mapsets** (so `t.in.era5` imports its space-time dataset there), and the rest carry
+  the reason they cannot run. The panel's **Catalogue** tree keeps
   all modules, only the imagery ones, or only the temporal ones; `imagery-state` and
-  `temporal-state` turn those filters on and `all-state` turns them off. No temporal
-  module can run from one raster (they read a space-time dataset), so the Temporal
-  mode is a catalogue: each `t.*` module carries the reason it cannot be driven here.
+  `temporal-state` turn those filters on and `all-state` turns them off. A temporal
+  module whose required parameter names a space-time dataset or a raster cannot be
+  given one by the form, so it keeps its reason.
   A leading triangle **▸** marks a module Run Module can
   drive; the others carry their reason, such as *needs several bands*, *needs an
   imagery group* or *needs a display*, so tell the user what the module needs instead
@@ -133,7 +136,10 @@ size. The run messages always state the region that was used; quote it.
 - `data-browse` lists a mapset's maps in the panel's tree; `data-add` exports the map
   chosen there (a raster as a GeoTIFF, a vector as a GeoPackage, both carrying their
   coordinate system) and adds it to the project.
-- Results are kept in `~/.cache/rustgis-grass-plugin/`, and the messages give the path.
+- A temporal, database or general module run through the form writes into the mapset
+  chosen under **Projects and mapsets**, not a throwaway one, so its dataset outlives
+  the run. Choose the mapset first; without one the run says so and stops.
+- Raster results are kept in `~/.cache/rustgis-grass-plugin/`, and the messages give the path.
   The last twelve modules run there are listed under the tree's **Recently run** branch.
 
 ## When something fails

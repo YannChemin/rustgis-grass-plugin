@@ -26,6 +26,11 @@ PLUMBING_PARAMS = frozenset({"input", "output", "layer"})
 #: temporal modules read instead of one raster.
 TEMPORAL_ELEMENTS = frozenset({"stds", "strds", "stvds", "str3ds", "stdsp"})
 
+#: Families whose modules can run with the form alone, writing into the GRASS
+#: project/mapset chosen in the panel: they work on state and datasets rather
+#: than on one raster in and one raster out.
+MAPSET_FAMILIES = frozenset({"Temporal", "Database", "General", "Miscellaneous"})
+
 #: A plugin manifest allows this many parameters per tool.
 MAX_PARAMS = 32
 
@@ -166,6 +171,84 @@ def _needs_text(names):
     return f"needs {shown}" + ("..." if len(names) > 3 else "")
 
 
+
+
+def _offerable(task):
+    """Return the parameter and flag names a form can offer for a module."""
+    names, seen = set(), set()
+    for param in task.findall("parameter"):
+        name = param.get("name") or ""
+        if not name or name in PLUMBING_PARAMS or name in seen:
+            continue
+        seen.add(name)
+        if _kind_of(param) is not None and VALID_NAME.match(name):
+            names.add(name)
+    for flag in task.findall("flag"):
+        name = flag.get("name") or ""
+        if name and name not in PLUMBING_FLAGS and VALID_NAME.match(f"flag_{name}"):
+            names.add(f"flag_{name}")
+    return names
+
+
+def _cannot_name(param):
+    """Return what a form cannot name for a parameter, or None when it can."""
+    prompt = param.find("gisprompt")
+    if prompt is None:
+        return None
+    if prompt.get("age") == "new":
+        return "an output name, which the form cannot name"
+    element = _prompt(prompt)
+    if element in TEMPORAL_ELEMENTS:
+        return "a space-time dataset, which the form cannot name"
+    if element in ("raster", "cell", "raster_3d", "grid3"):
+        return "a raster, which the form cannot name"
+    if element == "vector":
+        return "a vector map, which the form cannot name"
+    if element == "dbtable":
+        return "a database table, which the form cannot name"
+    return None
+
+
+def _mapset_runnability(task):
+    """Return whether the form alone can run a module in a chosen mapset.
+
+    Temporal, database and general modules do not read one raster and write
+    another: they create or change datasets in a GRASS project. The panel's
+    form names their parameters, and the project/mapset chosen under Projects
+    and mapsets says where the work goes. A required parameter the form cannot
+    name (a raster, a space-time dataset, an output) still stops the module.
+
+    :return: ``{"mapset_runnable": bool, "mapset_reason": str}``
+    """
+    out = {"mapset_runnable": False, "mapset_reason": ""}
+    name = task.get("name") or ""
+    if family_of(name) not in MAPSET_FAMILIES:
+        out["mapset_reason"] = "works on a raster or vector layer"
+        return out
+    offered = _offerable(task)
+    missing = []
+    for param in task.findall("parameter"):
+        if param.get("required") != "yes":
+            continue
+        pname = param.get("name") or ""
+        if pname in offered or _text(param.find("default")):
+            continue
+        missing.append(_cannot_name(param) or (f"'{pname}'" if pname else "a parameter"))
+    for flag in task.findall("flag"):
+        if flag.get("required") != "yes":
+            continue
+        fname = flag.get("name") or ""
+        if f"flag_{fname}" not in offered:
+            missing.append(f"flag -{fname}")
+    if missing:
+        out["mapset_reason"] = "needs " + ", ".join(missing[:3])
+        if len(missing) > 3:
+            out["mapset_reason"] += "..."
+        return out
+    out["mapset_runnable"] = True
+    return out
+
+
 def _runnability(task):
     """Return whether the bridge can drive a module from one raster.
 
@@ -206,6 +289,7 @@ def _runnability(task):
         "bands": False,
         "temporal": temporal,
     }
+    out.update(_mapset_runnability(task))
     if not raster_ins:
         out["reason"] = "takes no raster"
         return out
@@ -480,9 +564,9 @@ def form_fields(xml_text):
                 picked = [str(p).strip() for p in parts if str(p).strip() in spec["choices"]]
                 if picked:
                     field["default"] = picked
-            elif kind == "select" and default in spec["choices"]:
-                field["default"] = default
-            elif kind in ("number", "text"):
+            elif kind in ("number", "text") or (
+                kind == "select" and default in spec["choices"]
+            ):
                 field["default"] = default
         out.append(field)
     return out

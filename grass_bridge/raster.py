@@ -304,13 +304,16 @@ def _clip(text, limit=200):
 
 def _module_label(entry):
     """Return one tree label: whether it runs, its name, summary and keywords."""
-    mark = "▸ " if entry.get("runnable") else "  "
+    runs = entry.get("runnable") or entry.get("mapset_runnable")
+    mark = "▸ " if runs else "  "
     text = f"{mark}{entry['module']}"
+    if entry.get("mapset_runnable") and not entry.get("runnable"):
+        text += " [in a chosen mapset]"
     if entry.get("summary"):
         text += f" — {entry['summary']}"
     if entry.get("keywords"):
         text += f" — {entry['keywords']}"
-    if not entry.get("runnable") and entry.get("reason"):
+    if not runs and entry.get("reason"):
         text += f" [{entry['reason']}]"
     return _clip(text)
 
@@ -356,7 +359,11 @@ def catalogue_tree(catalogue, chosen=None, recent=(), family=None):
     """
     if family:
         catalogue = [entry for entry in catalogue if entry["family"] == family]
-    runs = [entry for entry in catalogue if entry.get("runnable")]
+    runs = [
+        entry
+        for entry in catalogue
+        if entry.get("runnable") or entry.get("mapset_runnable")
+    ]
     all_label = f"All {family.lower()} modules" if family else "All modules"
     nodes = [
         {
@@ -392,12 +399,18 @@ def catalogue_tree(catalogue, chosen=None, recent=(), family=None):
     if chosen:
         entry = entry_for(catalogue, chosen, quietly=True)
         if entry and not entry.get("runnable"):
-            notes.append(
-                f"{entry['module']} cannot be run from this panel: "
-                f"{entry.get('reason') or 'it needs a form'}. "
-                "Run Module names only one raster in and one out; every other "
-                "parameter would be GRASS's default."
-            )
+            if entry.get("mapset_runnable"):
+                notes.append(
+                    f"{entry['module']} runs with the form above in the GRASS "
+                    "project and mapset chosen under Projects and mapsets."
+                )
+            else:
+                notes.append(
+                    f"{entry['module']} cannot be run from this panel: "
+                    f"{entry.get('reason') or 'it needs a form'}. "
+                    "Run Module names only one raster in and one out; every "
+                    "other parameter would be GRASS's default."
+                )
     return nodes, notes
 
 
@@ -447,6 +460,12 @@ def module_details(entry):
         lines.append(
             "Runs here; the form above sets its parameters, GRASS's defaults "
             "until changed."
+        )
+    elif entry.get("mapset_runnable"):
+        lines.append(
+            "Runs here in a GRASS mapset: choose the project and mapset under "
+            "Projects and mapsets, then Run Module runs the form's values "
+            "there. GRASS's defaults are used until changed."
         )
     else:
         lines.append(
@@ -597,6 +616,46 @@ def form_args(entry, values):
         if text:
             args.append(f"{name}={text}")
     return args
+
+
+def missing_form_values(entry, values):
+    """Return the required form fields that hold no usable value.
+
+    A field with a default can be left empty: GRASS itself fills it. Every
+    other required field has to hold something the module accepts before the
+    run starts, so the error names the field instead of waiting for GRASS.
+
+    :param entry: a catalogue entry, whose ``form`` names its fields
+    :param values: the panel's form value, ``{field id: value}``
+    :return: the missing field ids, in the form's own order
+    """
+    values = values or {}
+    missing = []
+    for field in form_of(entry):
+        if not field.get("required") or "default" in field:
+            continue
+        name = field["id"]
+        value = values.get(name)
+        kind = field.get("kind")
+        if kind == "checkbox":
+            good = value is True
+        elif kind == "multi":
+            parts = value.split(",") if isinstance(value, str) else value
+            choices = field.get("choices") or []
+            good = isinstance(parts, list) and any(
+                str(p).strip() in choices for p in parts
+            )
+        elif kind == "select":
+            good = str(value or "") in (field.get("choices") or [])
+        elif kind == "number":
+            good = not isinstance(value, bool) and isinstance(value, (int, float))
+            if good and field.get("integer"):
+                good = float(value).is_integer()
+        else:
+            good = bool(str(value or "").strip())
+        if not good:
+            missing.append(name)
+    return missing
 
 
 def output_dir():

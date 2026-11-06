@@ -560,6 +560,150 @@ def test_temporal_modules_are_recognised_by_their_dataset_prompt():
     assert entry["temporal"] is True
 
 
+def temporal_task(extra="", name="t.import"):
+    """Return a temporal module description with a form and no raster."""
+    return f"""<task name="{name}">
+  <label>Imports a dataset into a mapset.</label>
+  <parameter name="variables" type="string" required="yes" multiple="yes">
+    <description>Variables to import</description>
+    <values><value><name>t2m</name></value><value><name>tp</name></value></values>
+  </parameter>
+  <parameter name="prefix" type="string" required="yes">
+    <description>Output prefix</description>
+    <default>out</default>
+  </parameter>
+  {extra}
+</task>"""
+
+
+def test_a_temporal_module_runs_with_its_form_in_a_chosen_mapset():
+    entry = interface.describe(temporal_task())
+    assert entry["runnable"] is False
+    assert entry["mapset_runnable"] is True
+    assert entry["mapset_reason"] == ""
+    fields = interface.form_fields(temporal_task())
+    assert [f["id"] for f in fields] == ["variables", "prefix"]
+
+
+def test_a_temporal_module_needing_a_dataset_says_the_form_cannot_name_it():
+    extra = """<parameter name="input" type="string" required="yes">
+      <description>Input space-time dataset</description>
+      <gisprompt age="old" element="strds" prompt="strds" />
+    </parameter>"""
+    entry = interface.describe(temporal_task(extra))
+    assert entry["mapset_runnable"] is False
+    assert "space-time dataset" in entry["mapset_reason"]
+
+
+def test_a_required_output_name_is_not_something_the_form_can_fill():
+    extra = """<parameter name="output" type="string" required="yes">
+      <description>Output raster</description>
+      <gisprompt age="new" element="cell" prompt="raster" />
+    </parameter>"""
+    entry = interface.describe(temporal_task(extra))
+    assert entry["mapset_runnable"] is False
+    assert "output name" in entry["mapset_reason"]
+
+
+def test_the_panel_runs_a_mapset_module_with_the_form(monkeypatch, tmp_path):
+    import main
+
+    base = tmp_path / "db"
+    (base / "P" / "PERMANENT").mkdir(parents=True)
+    (base / "P" / "PERMANENT" / "WIND").write_text("")
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setattr(main.database, "gisdbase", lambda: str(base))
+    monkeypatch.setattr(main, "call", lambda op, params=None: {})
+    monkeypatch.setattr(main, "progress", lambda text: None)
+    seen = {}
+
+    class FakeRun:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def mapset_module(self, base, project, mapset, module, args):
+            seen.update(
+                base=base, project=project, mapset=mapset, module=module, args=args
+            )
+            return [f"{module} ran in {project}/{mapset}."]
+
+    monkeypatch.setattr(main.session, "Run", FakeRun)
+    module = "t.in.era5"
+    entry = {
+        "module": module,
+        "summary": "Imports ERA5.",
+        "family": "Temporal",
+        "keywords": "",
+        "runnable": False,
+        "mapset_runnable": True,
+        "mapset_reason": "",
+        "reason": "takes no raster",
+        "form": [
+            {"id": "variables", "kind": "multi", "required": True, "choices": ["t2m"]},
+            {"id": "start", "kind": "text", "required": True},
+            {"id": "end", "kind": "text", "required": True},
+            {"id": "prefix", "kind": "text", "required": True, "default": "era5"},
+        ],
+    }
+    answer = main.run_module_in_mapset(
+        [entry],
+        entry,
+        {
+            "database": "mapset/P/PERMANENT",
+            "form": {
+                "variables": ["t2m"],
+                "start": "2020-01-01",
+                "end": "2020-01-02",
+            },
+        },
+    )
+    assert seen == {
+        "base": str(base),
+        "project": "P",
+        "mapset": "PERMANENT",
+        "module": module,
+        "args": ["variables=t2m", "start=2020-01-01", "end=2020-01-02"],
+    }
+    assert "ran in P/PERMANENT" in answer["messages"][0]
+
+
+def test_the_panel_refuses_a_module_it_cannot_drive(monkeypatch):
+    import main
+
+    entry = {
+        "module": "i.pca",
+        "summary": "Principal components.",
+        "family": "Imagery",
+        "keywords": "",
+        "runnable": False,
+        "reason": "needs several bands",
+        "mapset_runnable": False,
+        "mapset_reason": "works on a raster or vector layer",
+    }
+    monkeypatch.setattr(
+        main,
+        "load_catalogue",
+        lambda: {"catalogue": [entry]},
+    )
+    monkeypatch.setattr(
+        main, "call", lambda op, params=None: (_ for _ in ()).throw(AssertionError(op))
+    )
+    with pytest.raises(main.session.GrassError, match="needs several bands"):
+        main.run_module({"panel": {"values": {"modules": "all/i.pca"}}})
+
+
+def test_a_raster_module_is_not_offered_as_a_mapset_run():
+    entry = interface.describe(raster_task())
+    assert entry["mapset_runnable"] is False
+    assert "raster or vector" in entry["mapset_reason"]
+
+
 def test_a_required_3d_raster_named_input_is_not_mistaken_for_plumbing():
     extra = """<parameter name="input" type="string" required="yes">
       <description>3D raster to slice</description>

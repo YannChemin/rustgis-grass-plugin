@@ -245,9 +245,14 @@ COMMANDS = [
         "id": "run-module",
         "label": "Run\nModule",
         "help": "Run the module chosen in the GRASS Modules tree on the chosen "
-        "raster layer, with GRASS's own defaults.",
+        "raster layer, with GRASS's own defaults. A module that needs no "
+        "raster runs with the form's values in the GRASS mapset chosen under "
+        "Projects and mapsets.",
         "icon": "stats",
-        "params": "{} (the panel's trees choose the module and the layer)",
+        "params": "{} (the panel's trees choose the module, the layer and the mapset)",
+        # A download (t.in.era5) does not fit in the 120 seconds a command
+        # normally gets.
+        "timeout": 86400,
     },
     {
         "id": "imagery-state",
@@ -438,8 +443,9 @@ PANEL = {
             "label": "GRASS modules (runs here first)",
             "help": "Searchable by module name, summary and GRASS keywords. "
             "'Runs from here' lists the modules Run Module can drive on the "
-            "chosen raster; 'All modules' lists every installed one with the "
-            "reason the others cannot run here; 'Recently run' returns to one. The "
+            "chosen raster, or with their form in the mapset chosen under "
+            "Projects and mapsets; 'All modules' lists every installed one with "
+            "the reason the others cannot run here; 'Recently run' returns to one. The "
             "Catalogue tree above keeps all modules, or only the imagery or "
             "temporal ones.",
             "search": True,
@@ -637,6 +643,11 @@ def build():
                 # panel can offer a "runs here" list instead of a promise.
                 "runnable": described["runnable"],
                 "reason": described["reason"],
+                # A temporal, database or general module the form can drive in
+                # a project/mapset the user chooses, without one raster in and
+                # one out.
+                "mapset_runnable": described["mapset_runnable"],
+                "mapset_reason": described["mapset_reason"],
                 "needs": described["needs"],
                 "bands": described["bands"],
                 "temporal": described["temporal"],
@@ -691,10 +702,16 @@ def build():
 
     rasters = sum(1 for entry in catalogue if entry["raster"])
     runnable = sum(1 for entry in catalogue if entry["runnable"])
+    in_mapset = sum(
+        1
+        for entry in catalogue
+        if entry["mapset_runnable"] and not entry["runnable"]
+    )
     print(
         f"  {len(tools)} vector modules became tools, {len(left_out)} more could "
         f"have; {runnable} of {rasters} raster modules run from the panel with "
-        f"defaults; {len(catalogue)} modules in the tree"
+        f"defaults; {in_mapset} more run from their form in a chosen mapset; "
+        f"{len(catalogue)} modules in the tree"
     )
 
     raster_cmds, raster_modules, raster_menus = raster_commands(catalogue)
@@ -717,7 +734,7 @@ def build():
     manifest = {
         "id": "grass-vector",
         "name": "GRASS GIS Tools",
-        "version": "0.8.0",
+        "version": "0.9.0",
         "description": (
             "Runs GRASS GIS modules: vector modules as geoprocessing tools, and "
             "every installed module from a panel and a tab of its own. GRASS "

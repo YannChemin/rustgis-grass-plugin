@@ -329,9 +329,9 @@ class Run:
             raise GrassError(f"cannot create a project from {crs}: {_why(out)}")
         return path
 
-    def exec(self, project, module, *args):
+    def exec(self, project, module, *args, mapset="PERMANENT"):
         """Run one module in ``project`` and return its standard output."""
-        argv = [self.grass, os.path.join(project, "PERMANENT"), "--exec", module, *args]
+        argv = [self.grass, os.path.join(project, mapset), "--exec", module, *args]
         allowed = self.left()
         try:
             out = subprocess.run(
@@ -346,6 +346,35 @@ class Run:
         for text in _warnings(out.stderr or ""):
             self.warnings[text] = self.warnings.get(text, 0) + 1
         return out.stdout
+
+    def mapset_module(self, base, project, mapset, module, args=()):
+        """Run one module in the user's own project and mapset.
+
+        The module writes where the user asked it to, so the result outlives
+        the run: this is for a module the form drives (a temporal import, a
+        database command), not for one raster in and one out.
+
+        :param base: the GRASS database
+        :param project: the project's name
+        :param mapset: the mapset's name
+        :param module: the GRASS module
+        :param args: its ``name=value`` and ``-flag`` arguments
+        :return: ``[message, ...]``
+        :raises GrassError: when the module fails
+        """
+        path = os.path.join(base, project)
+        self.progress(f"Running {module} in {project}/{mapset}...")
+        out = self.exec(path, module, *args, mapset=mapset)
+        messages = [f"{module} ran in GRASS project {project}, mapset {mapset}."]
+        printed = [
+            line.strip() for line in (out or "").splitlines() if line.strip()
+        ][-20:]
+        messages += [line[:500] for line in printed]
+        for text, count in self.warnings.items():
+            messages.append(
+                f"GRASS: {text}" + (f" ({count} times)" if count > 1 else "")
+            )
+        return messages
 
     def vector_tool(self, module, geojson, params, flags=()):
         """Run a vector module over a FeatureCollection.

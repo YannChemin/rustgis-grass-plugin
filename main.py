@@ -321,15 +321,69 @@ def export_source(name, values):
     return exported, notes, info
 
 
+def run_module_in_mapset(catalogue, entry, values):
+    """Run a module the form drives in the chosen GRASS project and mapset.
+
+    A temporal, database or general module does not read one raster and write
+    another: it imports a dataset or changes the project it runs in. The form
+    names its parameters, and the project and mapset chosen under Projects
+    and mapsets say where the work should go.
+    """
+    base = database.gisdbase()
+    if not base:
+        raise session.GrassError(
+            "no GRASS database was found: GISDBASE is not set, GRASS's settings "
+            "file names none, and there is no ~/grassdata"
+        )
+    target = database.chosen_mapset(base, values.get("database"))
+    if not target:
+        raise session.GrassError(
+            f"{entry['module']} runs in a GRASS mapset: choose the project and "
+            "mapset it should write to under Projects and mapsets."
+        )
+    form = values.get("form") or {}
+    missing = raster.missing_form_values(entry, form)
+    if missing:
+        raise session.GrassError(
+            f"{entry['module']} needs {', '.join(missing)} before it can run"
+        )
+    args = raster.form_args(entry, form)
+    project, mapset = target
+    with session.Run(progress=progress) as run:
+        messages = run.mapset_module(
+            base, project, mapset, entry["module"], args
+        )
+    for text in messages:
+        log(text)
+    call("host.notify", {"text": f"{entry['module']}: {messages[0]}"})
+    recent = raster.remember(entry["module"])
+    family = raster.mode_family(values.get("mode"))
+    nodes, notes = raster.catalogue_tree(
+        catalogue, entry["module"], recent, family=family
+    )
+    return {
+        "messages": messages + notes,
+        "panel": {
+            "items": {
+                "modules": {"nodes": nodes},
+                "details": {"text": raster.module_details(entry)},
+                "form": {"fields": raster.form_of(entry)},
+                "status": {"text": "\n".join(messages + notes)},
+                **database_panel(values.get("database")),
+            }
+        },
+    }
+
+
 def run_module(req, module=None):
-    """Run a raster module on the chosen raster layer.
+    """Run the module chosen in the tree, on a raster or in a mapset.
 
     Every installed module is in the panel's tree, and the common ones have a
-    ribbon command of their own (``module`` names that one). Either way only a
-    module that reads a raster and writes one can be run: a command has no
-    form, so the bridge names the input and the output and nothing else. A
-    module that needs more than that has to be a tool, and a manifest holds 64
-    of those.
+    ribbon command of their own (``module`` names that one). A module that
+    reads a raster and writes one runs on the chosen layer. A temporal,
+    database or general module the form can drive runs in the GRASS project
+    and mapset chosen under Projects and mapsets, so what it writes outlives
+    the run.
 
     :param module: the GRASS module a curated command runs, or None to take
         the one chosen in the tree
@@ -337,6 +391,13 @@ def run_module(req, module=None):
     values = (req.get("panel") or {}).get("values") or {}
     catalogue = load_catalogue().get("catalogue") or []
     entry = raster.entry_for(catalogue, module or values.get("modules"))
+    if not entry.get("runnable"):
+        if entry.get("mapset_runnable"):
+            return run_module_in_mapset(catalogue, entry, values)
+        raise session.GrassError(
+            f"{entry['module']} cannot be run from this panel: "
+            f"{entry.get('reason') or 'its form cannot name what it needs'}"
+        )
     argv = raster.free_module_args(entry) + raster.form_args(entry, values.get("form"))
 
     layers = call("host.layers") or []
@@ -520,16 +581,27 @@ def panel_state(req, mode=None):
     )
     catalogue = load_catalogue().get("catalogue") or []
     runnable = sum(1 for entry in catalogue if entry.get("runnable"))
+    in_mapset = sum(
+        1
+        for entry in catalogue
+        if entry.get("mapset_runnable") and not entry.get("runnable")
+    )
     if catalogue:
         status += (
-            f" {runnable} of {len(catalogue)} modules run from here with "
-            "GRASS's own defaults; the tree gives the reason for the others."
+            f" {runnable} of {len(catalogue)} modules run on the chosen raster "
+            "with GRASS's own defaults"
         )
+        if in_mapset:
+            status += (
+                f"; {in_mapset} more run with their form in a chosen GRASS "
+                "project and mapset"
+            )
+        status += "; the tree gives the reason for the others."
         if family:
             status += f" Showing {family.lower()} modules only."
-    if not nodes:
-        status += " The map has no raster layer."
     chosen_module = raster.entry_for(catalogue, values.get("modules"), quietly=True)
+    if not nodes and not (chosen_module and chosen_module.get("mapset_runnable")):
+        status += " The map has no raster layer."
     module_nodes, _ = raster.catalogue_tree(
         catalogue,
         values.get("modules"),

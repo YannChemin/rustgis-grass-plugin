@@ -1,3 +1,19 @@
+rustgis-grass-plugin (0.9.0) unstable; urgency=medium
+
+  * Run Module now runs a temporal, database or general module from the
+    panel's form in the GRASS project and mapset chosen under Projects and
+    mapsets: t.in.era5 imports its space-time dataset there. 91 more modules
+    run this way (179 in all); required form fields are checked first, and a
+    required raster, dataset or output name the form cannot name keeps its
+    reason.
+  * A module command may declare "timeout" seconds in plugin.json (1 to
+    86400); run-module asks for a day, so a download is not stopped after two
+    minutes.
+  * The manifest now carries 24 panel items, 38 commands, 64 tools and 7
+    ribbon groups, and its version is 0.9.0.
+
+ -- Yann Chemin <dr.yann.chemin@gmail.com>  Fri, 06 Nov 2026 12:00:00 +0100
+
 rustgis-grass-plugin (0.8.0) unstable; urgency=medium
 
   * The panel gains a Module parameters form: choosing a module fills it with
