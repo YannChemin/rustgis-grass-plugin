@@ -31,6 +31,14 @@ TEMPORAL_ELEMENTS = frozenset({"stds", "strds", "stvds", "str3ds", "stdsp"})
 #: than on one raster in and one raster out.
 MAPSET_FAMILIES = frozenset({"Temporal", "Database", "General", "Miscellaneous"})
 
+#: Display modules whose raster input is optional in GRASS but which still
+#: draw it: d.legend needs a raster (or a 3D raster) to have anything to show.
+RENDER_OPTIONAL_INPUT = frozenset({"d.legend"})
+
+#: Display modules that wait for a click or an editor, which a form cannot
+#: give them even while a cairo monitor is running.
+RENDER_INTERACTIVE = frozenset({"d.what.rast", "d.what.vect", "d.rast.edit"})
+
 #: A plugin manifest allows this many parameters per tool.
 MAX_PARAMS = 32
 
@@ -249,6 +257,112 @@ def _mapset_runnability(task):
     return out
 
 
+def _layer_element(param):
+    """Return a parameter's layer element (raster, cell, grid3, vector), or ""."""
+    prompt = param.find("gisprompt")
+    if prompt is None:
+        return ""
+    element = _prompt(prompt)
+    return element if element in ("raster", "cell", "raster_3d", "grid3", "vector") else ""
+
+
+def _render_runnability(task):
+    """Return whether a display module can draw a picture from its form.
+
+    A ``d.*`` module does not write a raster: it draws on a monitor. The
+    bridge can give it a cairo monitor, so the modules that draw one or more
+    layers are offered here; the ones that only decorate a display, wait for a
+    click, write a map, or need a file stay marked with the reason.
+
+    :return: ``{"render_runnable", "render_reason", "render_inputs"}``, where
+        each input is ``{"name", "kind", "label", "help", "required",
+        "multiple"}`` for a layer the form can choose.
+    """
+    out = {"render_runnable": False, "render_reason": "", "render_inputs": []}
+    name = task.get("name") or ""
+    if family_of(name) != "Display":
+        return out
+    if name in RENDER_INTERACTIVE:
+        out["render_reason"] = "waits for a click on the display"
+        return out
+
+    inputs, outputs, files = [], [], []
+    for param in task.findall("parameter"):
+        prompt = param.find("gisprompt")
+        if prompt is not None:
+            element = _prompt(prompt)
+            if element in ("raster", "cell", "raster_3d", "grid3", "vector"):
+                if prompt.get("age") == "new":
+                    outputs.append(param.get("name") or "?")
+                    continue
+                if element in ("raster_3d", "grid3"):
+                    if param.get("required") == "yes":
+                        out["render_reason"] = "needs a 3D raster"
+                        return out
+                    continue
+                inputs.append(
+                    {
+                        "name": param.get("name") or "",
+                        "kind": "vector" if element == "vector" else "raster",
+                        "label": (
+                            _text(param.find("label"))
+                            or _text(param.find("description"))
+                            or (param.get("name") or "")
+                        ),
+                        "help": _text(param.find("description")),
+                        "required": param.get("required") == "yes",
+                        "multiple": param.get("multiple") == "yes",
+                    }
+                )
+                continue
+        if param.get("required") == "yes" and _kind_of(param) == "file":
+            files.append(param.get("name") or "?")
+
+    if files:
+        out["render_reason"] = "needs a file"
+        return out
+    if outputs:
+        out["render_reason"] = "writes a map, not a picture"
+        return out
+    if not inputs:
+        out["render_reason"] = "draws on a display, not into a layer"
+        return out
+    if not any(port["required"] for port in inputs) and name not in RENDER_OPTIONAL_INPUT:
+        out["render_reason"] = "draws on a display, not into a layer"
+        return out
+    if name in RENDER_OPTIONAL_INPUT:
+        for port in inputs:
+            if port["name"] == "raster":
+                port["required"] = True
+
+    offered = _offerable(task)
+    missing = []
+    for param in task.findall("parameter"):
+        if param.get("required") != "yes" or _layer_element(param):
+            continue
+        pname = param.get("name") or ""
+        if pname in offered or _text(param.find("default")):
+            continue
+        missing.append(
+            _cannot_name(param) or (f"'{pname}'" if pname else "a parameter")
+        )
+    for flag in task.findall("flag"):
+        if flag.get("required") != "yes":
+            continue
+        fname = flag.get("name") or ""
+        if f"flag_{fname}" not in offered:
+            missing.append(f"flag -{fname}")
+    if missing:
+        out["render_reason"] = "needs " + ", ".join(missing[:3])
+        if len(missing) > 3:
+            out["render_reason"] += "..."
+        return out
+
+    out["render_runnable"] = True
+    out["render_inputs"] = inputs
+    return out
+
+
 def _runnability(task):
     """Return whether the bridge can drive a module from one raster.
 
@@ -290,10 +404,15 @@ def _runnability(task):
         "temporal": temporal,
     }
     out.update(_mapset_runnability(task))
-    # d.* modules open or drive a display, and Run Module has no display to
-    # give them: d.rast.edit would wait for an editor that never appears.
+    out.update(_render_runnability(task))
+    # d.* modules open or drive a display. The ones that draw data can be
+    # given a cairo monitor; the rest say what they need instead.
     if family_of(task.get("name") or "") == "Display":
-        out["reason"] = "needs a display"
+        out["reason"] = (
+            "renders a picture"
+            if out.get("render_runnable")
+            else (out.get("render_reason") or "needs a display")
+        )
         return out
     if not raster_ins:
         out["reason"] = "takes no raster"

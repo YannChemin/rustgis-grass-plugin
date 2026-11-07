@@ -596,10 +596,23 @@ def test_a_long_description_becomes_a_short_label_with_the_full_text_as_help():
     assert field["help"].startswith("Directory to permanently cache full-world")
 
 
-def test_a_display_module_says_it_needs_a_display_not_a_raster():
+def display_task(extra="", name="d.example"):
+    """Return a display module description drawing one raster."""
+    return f"""<task name="{name}">
+  <label>Draws a raster on a display.</label>
+  <parameter name="map" type="string" required="yes" multiple="no">
+    <description>Name of raster map</description>
+    <gisprompt age="old" element="cell" prompt="raster" />
+  </parameter>
+  {extra}
+</task>"""
+
+
+def test_a_display_module_that_writes_a_map_is_not_a_picture():
     entry = interface.describe(raster_task(name="d.example"))
     assert entry["runnable"] is False
-    assert entry["reason"] == "needs a display"
+    assert entry["render_runnable"] is False
+    assert entry["reason"] == "writes a map, not a picture"
 
 
 def test_a_temporal_module_needing_a_dataset_says_the_form_cannot_name_it():
@@ -743,10 +756,37 @@ def test_a_module_taking_a_base_name_reads_several_bands():
     assert entry["reason"] == "needs several bands"
 
 
-def test_a_display_module_is_not_offered_without_a_display():
-    entry = interface.describe(raster_task(name="d.example"))
+def test_a_display_module_is_offered_when_it_can_render_its_input():
+    entry = interface.describe(display_task())
     assert entry["runnable"] is False
-    assert entry["reason"] == "needs a display"
+    assert entry["render_runnable"] is True
+    assert entry["reason"] == "renders a picture"
+    assert entry["render_inputs"] == [
+        {
+            "name": "map",
+            "kind": "raster",
+            "label": "Name of raster map",
+            "help": "Name of raster map",
+            "required": True,
+            "multiple": False,
+        }
+    ]
+
+
+def test_a_display_module_waiting_for_a_click_is_not_rendered():
+    entry = interface.describe(display_task(name="d.what.rast"))
+    assert entry["render_runnable"] is False
+    assert entry["render_reason"] == "waits for a click on the display"
+
+
+def test_a_display_module_with_no_layer_only_draws_on_a_display():
+    entry = interface.describe(
+        """<task name="d.barscale">
+  <label>Draws a scale bar on a display.</label>
+</task>"""
+    )
+    assert entry["render_runnable"] is False
+    assert entry["render_reason"] == "draws on a display, not into a layer"
 
 
 def test_the_panel_keeps_an_imagery_mode_and_filters_the_module_tree(monkeypatch):

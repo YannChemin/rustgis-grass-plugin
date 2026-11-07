@@ -648,6 +648,11 @@ def build():
                 # one out.
                 "mapset_runnable": described["mapset_runnable"],
                 "mapset_reason": described["mapset_reason"],
+                # A display module that can draw a picture from its form: the
+                # bridge gives it a cairo monitor and imports the picture.
+                "render_runnable": described["render_runnable"],
+                "render_reason": described["render_reason"],
+                "render_inputs": described["render_inputs"],
                 "needs": described["needs"],
                 "bands": described["bands"],
                 "temporal": described["temporal"],
@@ -707,10 +712,12 @@ def build():
         for entry in catalogue
         if entry["mapset_runnable"] and not entry["runnable"]
     )
+    renders = sum(1 for entry in catalogue if entry["render_runnable"])
     print(
         f"  {len(tools)} vector modules became tools, {len(left_out)} more could "
         f"have; {runnable} of {rasters} raster modules run from the panel with "
         f"defaults; {in_mapset} more run from their form in a chosen mapset; "
+        f"{renders} display modules render a picture; "
         f"{len(catalogue)} modules in the tree"
     )
 

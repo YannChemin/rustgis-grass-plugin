@@ -28,7 +28,7 @@ import math
 import os
 import time
 
-from . import session
+from . import interface, session
 
 #: What each command does, by its local command id.
 OPERATIONS = {
@@ -304,11 +304,21 @@ def _clip(text, limit=200):
 
 def _module_label(entry):
     """Return one tree label: whether it runs, its name, summary and keywords."""
-    runs = entry.get("runnable") or entry.get("mapset_runnable")
+    runs = (
+        entry.get("runnable")
+        or entry.get("mapset_runnable")
+        or entry.get("render_runnable")
+    )
     mark = "▸ " if runs else "  "
     text = f"{mark}{entry['module']}"
     if entry.get("mapset_runnable") and not entry.get("runnable"):
         text += " [in a chosen mapset]"
+    if (
+        entry.get("render_runnable")
+        and not entry.get("runnable")
+        and not entry.get("mapset_runnable")
+    ):
+        text += " [renders a picture]"
     if entry.get("summary"):
         text += f" — {entry['summary']}"
     if entry.get("keywords"):
@@ -362,7 +372,9 @@ def catalogue_tree(catalogue, chosen=None, recent=(), family=None):
     runs = [
         entry
         for entry in catalogue
-        if entry.get("runnable") or entry.get("mapset_runnable")
+        if entry.get("runnable")
+        or entry.get("mapset_runnable")
+        or entry.get("render_runnable")
     ]
     all_label = f"All {family.lower()} modules" if family else "All modules"
     nodes = [
@@ -403,6 +415,12 @@ def catalogue_tree(catalogue, chosen=None, recent=(), family=None):
                 notes.append(
                     f"{entry['module']} runs with the form above in the GRASS "
                     "project and mapset chosen under Projects and mapsets."
+                )
+            elif entry.get("render_runnable"):
+                notes.append(
+                    f"{entry['module']} renders a picture from the form above: "
+                    "choose its raster or vector layers, then the result is a "
+                    "new raster layer of colours rather than data values."
                 )
             else:
                 notes.append(
@@ -456,6 +474,12 @@ def module_details(entry):
         lines.append("Reads: " + ", ".join(reads))
     if writes:
         lines.append("Writes: " + ", ".join(writes))
+    vector_reads = entry.get("vector_in") or []
+    vector_writes = entry.get("vector_out") or []
+    if vector_reads:
+        lines.append("Reads (vector): " + ", ".join(vector_reads))
+    if vector_writes:
+        lines.append("Writes (vector): " + ", ".join(vector_writes))
     if entry.get("runnable"):
         lines.append(
             "Runs here; the form above sets its parameters, GRASS's defaults "
@@ -466,6 +490,13 @@ def module_details(entry):
             "Runs here in a GRASS mapset: choose the project and mapset under "
             "Projects and mapsets, then Run Module runs the form's values "
             "there. GRASS's defaults are used until changed."
+        )
+    elif entry.get("render_runnable"):
+        lines.append(
+            "Renders a picture: the form above chooses its layers, and the "
+            "result is a new raster layer holding the colours of the display "
+            "module, not its input's values. Tick 'Keep the PNG preview' to "
+            "also write the picture itself."
         )
     else:
         lines.append(
@@ -656,6 +687,206 @@ def missing_form_values(entry, values):
         if not good:
             missing.append(name)
     return missing
+
+
+#: The form's own checkbox for keeping the picture the display module drew.
+PREVIEW_FIELD = "preview_png"
+
+
+def _layer_choices(layers, kind):
+    """Return the project's layer names that can fill a ``kind`` input."""
+    out = []
+    for layer in layers or []:
+        if kind == "raster":
+            usable = bool(layer.get("raster"))
+        else:
+            usable = not layer.get("raster") and bool(layer.get("geometry"))
+        name = str(layer.get("name") or layer.get("id") or "")
+        if usable and name and name not in out:
+            out.append(name)
+    return out
+
+
+def _find_layer(layers, text, kind):
+    """Return the project layer whose name or id is ``text``, or None."""
+    for layer in layers or []:
+        if kind == "raster" and not layer.get("raster"):
+            continue
+        if kind == "vector" and (layer.get("raster") or not layer.get("geometry")):
+            continue
+        if text in (str(layer.get("name")), str(layer.get("id"))):
+            return layer
+    return None
+
+
+def render_form(entry, layers, chosen=None):
+    """Return the form fields for a display module that renders a picture.
+
+    The module's own parameters are kept, and one field is added for each
+    layer input the module declares: the chosen raster fills the first single
+    raster input, and every vector (and any further raster) is chosen here.
+
+    :param entry: a catalogue entry with ``render_inputs``
+    :param layers: ``host.layers``, the project's layers
+    :param chosen: the raster layer id picked in the tree, if any
+    :return: the fields the panel shows
+    """
+    inputs = list((entry or {}).get("render_inputs") or [])
+    raster_ports = [port for port in inputs if port.get("kind") == "raster"]
+    first_raster = raster_ports[0] if raster_ports else None
+    fields = []
+    for port in inputs:
+        kind = port.get("kind")
+        # The panel's chosen raster fills the first single raster input; there
+        # is no second question to ask about it.
+        if kind == "raster" and port is first_raster and not port.get("multiple"):
+            continue
+        choices = _layer_choices(layers, kind)
+        if not choices:
+            # No layer of this kind: show the field anyway only when it is
+            # optional, so the reason a required one is missing comes from
+            # render_plan rather than an empty list of choices.
+            if port.get("required"):
+                continue
+        label = interface._short_label(port.get("label") or port.get("name") or "")
+        if port.get("multiple"):
+            field = {
+                "id": port["name"],
+                "kind": "multi",
+                "label": label,
+                "choices": choices[:256],
+            }
+            if port.get("help"):
+                field["help"] = port["help"][:2000]
+            if port.get("required"):
+                field["required"] = True
+            elif len(choices) == 1:
+                field["default"] = [choices[0]]
+            fields.append(field)
+            continue
+        values = choices if port.get("required") else ["none"] + choices
+        field = {
+            "id": port["name"],
+            "kind": "select",
+            "label": label,
+            "choices": values[:256],
+        }
+        if port.get("help"):
+            field["help"] = port["help"][:2000]
+        if port.get("required"):
+            field["required"] = True
+            if len(choices) == 1:
+                field["default"] = choices[0]
+        else:
+            field["default"] = "none"
+        fields.append(field)
+    named = {port["name"] for port in inputs}
+    fields += [field for field in form_of(entry) if field["id"] not in named]
+    fields.append(
+        {
+            "id": PREVIEW_FIELD,
+            "kind": "checkbox",
+            "label": "Keep the PNG preview beside the GeoTIFF",
+            "help": (
+                "RustGIS loads the GeoTIFF as a new layer. Tick this to also "
+                "keep the picture the display module drew, on disk."
+            ),
+            "default": False,
+        }
+    )
+    return fields[: interface.MAX_FORM_FIELDS]
+
+
+def render_plan(entry, values, layers):
+    """Resolve a display module's form into the layers it will draw.
+
+    :param entry: a catalogue entry with ``render_inputs``
+    :param values: the panel's form values
+    :param layers: ``host.layers``, the project's layers
+    :return: ``(ports, preview)``, where each port is
+        ``{"name", "kind", "multiple", "layers"}`` and ``preview`` says
+        whether to keep the PNG
+    :raises session.GrassError: when a required input is missing or names no
+        layer of the project
+    """
+    values = values or {}
+    inputs = (entry or {}).get("render_inputs") or []
+    raster_ports = [port for port in inputs if port.get("kind") == "raster"]
+    first_raster = raster_ports[0] if raster_ports else None
+    ports, missing = [], []
+    for port in inputs:
+        name, kind = port["name"], port.get("kind")
+        raw = values.get(name)
+        names = []
+        if port.get("multiple"):
+            parts = raw.split(",") if isinstance(raw, str) else (raw or [])
+            names = [
+                str(part).strip()
+                for part in parts
+                if str(part).strip() and str(part).strip() != "none"
+            ]
+        else:
+            text = str(raw or "").strip()
+            if text and text != "none":
+                names = [text]
+            elif (
+                kind == "raster"
+                and port is first_raster
+                and str(values.get("raster") or "").strip()
+            ):
+                names = [str(values.get("raster"))]
+        picked = []
+        for text in names:
+            layer = _find_layer(layers, text, kind)
+            if layer is None:
+                raise session.GrassError(
+                    f"{entry['module']}: {text} is not a {kind} layer of this project"
+                )
+            picked.append(layer)
+        if not picked and port.get("required"):
+            missing.append(port.get("label") or name)
+        if picked:
+            ports.append(
+                {
+                    "name": name,
+                    "kind": kind,
+                    "multiple": bool(port.get("multiple")),
+                    "layers": picked,
+                }
+            )
+    if missing:
+        raise session.GrassError(
+            f"{entry['module']} needs {', '.join(missing)} before it can render"
+        )
+    if not ports:
+        raise session.GrassError(f"{entry['module']} needs a layer to draw")
+    return ports, bool(values.get(PREVIEW_FIELD))
+
+
+def render_args(entry, values, imported):
+    """Return a display module's arguments for the imported layers.
+
+    :param entry: a catalogue entry with ``render_inputs``
+    :param values: the panel's form values
+    :param imported: ``{port name: [GRASS map name, ...]}``
+    :return: a list of ``name=value`` and ``-flag`` arguments
+    """
+    ports = {port["name"] for port in (entry.get("render_inputs") or [])}
+    form_values = {
+        name: value
+        for name, value in (values or {}).items()
+        if name not in ports and name != PREVIEW_FIELD
+    }
+    args = []
+    for port in entry.get("render_inputs") or []:
+        maps = imported.get(port["name"]) or []
+        if maps:
+            args.append(f"{port['name']}={','.join(maps)}")
+    args += form_args(entry, form_values)
+    # Without -d, d.title only prints the title it would draw.
+    if entry.get("module") == "d.title" and "-d" not in args:
+        args.append("-d")
+    return args
 
 
 def output_dir():

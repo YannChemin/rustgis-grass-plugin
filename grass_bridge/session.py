@@ -479,3 +479,182 @@ class Run:
                 f"GRASS: {text}" + (f" ({count} times)" if count > 1 else "")
             )
         return result, list(self.messages)
+
+
+#: The most pixels one side of a rendered display may have. A cairo render is
+#: a screenshot, not a computation: it is capped for time and file size.
+RENDER_MAX_PIXELS = 2048
+
+
+class DisplayRun(Run):
+    """One display module rendered to a GeoTIFF, inside a command's time.
+
+    A ``d.*`` module draws on a monitor. This gives it a cairo monitor whose
+    picture is the size of the computational region, then imports that picture
+    with the world file beside it, so the colours become a three-band GeoTIFF
+    on the same grid as the layers the module drew.
+    """
+
+    def __init__(self, grass=None, progress=None, budget=None):
+        budget = COMMAND_LIMIT if budget is None else budget
+        super().__init__(
+            grass=grass, progress=progress, deadline=time.monotonic() + budget
+        )
+
+    def render(self, module, args, layers, target, preview=None):
+        """Render one display module over imported layers.
+
+        :param module: the GRASS display module, such as ``d.his``
+        :param args: its ``name=value`` and ``-flag`` arguments
+        :param layers: ``(kind, path, map_name)`` for each layer to import,
+            where ``kind`` is ``"raster"`` or ``"vector"``
+        :param target: where to write the GeoTIFF
+        :param preview: where to keep the PNG, or None to let it be removed
+        :return: ``[message, ...]``
+        :raises GrassError: when any step fails
+        """
+        if not layers:
+            raise GrassError(f"{module} needs a layer to draw")
+        rasters = [name for kind, _, name in layers if kind == "raster"]
+        vectors = [name for kind, _, name in layers if kind == "vector"]
+
+        self.progress("Preparing a working project…")
+        first = layers[0][1] if layers[0][0] == "raster" else "EPSG:4326"
+        project = self._project("display", first)
+
+        for kind, path, name in layers:
+            if kind == "raster":
+                self.exec(
+                    project,
+                    "r.in.gdal",
+                    f"input={path}",
+                    f"output={name}",
+                    "--overwrite",
+                    "--quiet",
+                )
+            else:
+                self.exec(
+                    project,
+                    "v.import",
+                    f"input={path}",
+                    f"output={name}",
+                    "--overwrite",
+                    "--quiet",
+                )
+
+        # The region decides both the extent of the picture and how many
+        # cells it spans. Use the rasters' own grid when there is one; a
+        # display-only run on vectors sets it from the vectors.
+        if rasters:
+            self.exec(project, "g.region", "raster=" + ",".join(rasters), "-a")
+        elif vectors:
+            self.exec(project, "g.region", "vector=" + ",".join(vectors))
+        region = self._region(project)
+        try:
+            west, south = float(region["w"]), float(region["s"])
+            east, north = float(region["e"]), float(region["n"])
+            cols, rows = int(float(region["cols"])), int(float(region["rows"]))
+        except (KeyError, ValueError) as e:
+            raise GrassError("the display has no readable region") from e
+        if cols < 1 or rows < 1 or west >= east or south >= north:
+            raise GrassError("the display region has no area")
+
+        # Match the region's aspect ratio, or the monitor pads the picture and
+        # the world file no longer fits it.
+        if cols >= rows:
+            width = min(cols, RENDER_MAX_PIXELS)
+            height = max(1, round(width * rows / cols))
+        else:
+            height = min(rows, RENDER_MAX_PIXELS)
+            width = max(1, round(height * cols / rows))
+
+        picture = os.path.join(self.dir, "display.png")
+        started = False
+        try:
+            self.exec(
+                project,
+                "d.mon",
+                "start=cairo",
+                f"output={picture}",
+                f"width={width}",
+                f"height={height}",
+                "--overwrite",
+            )
+            started = True
+            self.progress(f"Rendering {module}…")
+            self.exec(project, module, *args, "--overwrite", "--quiet")
+        finally:
+            if started:
+                try:
+                    self.exec(project, "d.mon", "stop=cairo")
+                except GrassError:
+                    # The picture may still be usable; the import below says
+                    # so if it is not.
+                    pass
+        if not os.path.exists(picture) or os.path.getsize(picture) == 0:
+            raise GrassError(f"{module} drew no picture; its form may be missing a layer")
+
+        xres = (east - west) / width
+        yres = (north - south) / height
+        world = os.path.splitext(picture)[0] + ".pgw"
+        with open(world, "w", encoding="utf-8") as fh:
+            fh.write(
+                f"{xres!r}\n0\n0\n{-yres!r}\n"
+                f"{west + xres / 2.0!r}\n{north - yres / 2.0!r}\n"
+            )
+
+        self.progress("Turning the picture into a map…")
+        self.exec(
+            project,
+            "r.in.gdal",
+            f"input={picture}",
+            "output=render",
+            "-o",
+            "--overwrite",
+            "--quiet",
+        )
+        # The imported picture keeps the region of the picture's grid, which
+        # is the extent and cell count the world file recorded.
+        self.exec(
+            project,
+            "g.region",
+            f"n={north!r}",
+            f"s={south!r}",
+            f"e={east!r}",
+            f"w={west!r}",
+            f"rows={height}",
+            f"cols={width}",
+        )
+        self.exec(
+            project,
+            "r.out.gdal",
+            "input=render",
+            f"output={target}",
+            "format=GTiff",
+            "-c",
+            "--overwrite",
+            "--quiet",
+        )
+        if not os.path.exists(target):
+            raise GrassError(f"{module} wrote no GeoTIFF at {target}")
+        if preview:
+            shutil.copyfile(picture, preview)
+
+        messages = [
+            f"{module} rendered a {width} by {height} picture.",
+            (
+                f"The picture spans {west:g} to {east:g} east and {south:g} to "
+                f"{north:g} north, on the grid of the layers it drew."
+            ),
+            (
+                f"It is a GeoTIFF at {target}, holding colours rather than the "
+                "input's values; the raster modules will treat those colours as data."
+            ),
+        ]
+        if preview:
+            messages.append(f"The PNG preview is kept at {preview}.")
+        for text, count in self.warnings.items():
+            messages.append(
+                f"GRASS: {text}" + (f" ({count} times)" if count > 1 else "")
+            )
+        return messages

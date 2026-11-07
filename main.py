@@ -294,7 +294,7 @@ def add_map(req):
     }
 
 
-def export_source(name, values):
+def export_source(name, values, tag=""):
     """Have RustGIS write the chosen raster layer, and say what went out.
 
     ``raster.info`` describes the layer before it leaves (its coordinate
@@ -304,12 +304,15 @@ def export_source(name, values):
 
     :param name: the layer's name
     :param values: the panel's widget values
+    :param tag: a suffix keeping several exports of one run apart
     :return: ``(path, [note, ...], info)``
     """
     info = call("raster.info", {"layer": name}) or {}
     raster.check_source(info, name)
     band, band_note = raster.choose_band(info, values)
-    exported = os.path.join(raster.output_dir(), f".export-{os.getpid()}.tif")
+    exported = os.path.join(
+        raster.output_dir(), f".export-{os.getpid()}{tag}.tif"
+    )
     progress(f"Exporting {name}...")
     params = {"layer": name, "path": exported}
     if band:
@@ -319,6 +322,119 @@ def export_source(name, values):
     if band_note:
         notes.append(band_note)
     return exported, notes, info
+
+
+def export_vector(name, tag=""):
+    """Have RustGIS write a vector layer as GeoJSON for a display module.
+
+    :param name: the layer's name
+    :param tag: a suffix keeping several exports of one run apart
+    :return: ``(path, [note, ...])``
+    """
+    target = os.path.join(
+        raster.output_dir(), f".export-{os.getpid()}{tag}.geojson"
+    )
+    try:
+        os.remove(target)
+    except OSError:
+        pass
+    progress(f"Exporting {name}...")
+    call("share.exportLayer", {"layer": name, "path": target, "crs": "EPSG:4326"})
+    if not os.path.exists(target):
+        raise session.GrassError(
+            f"RustGIS exported no file for {name}; the layer may be empty"
+        )
+    return target, []
+
+
+def run_display_module(catalogue, entry, values):
+    """Render a display module over the layers its form names.
+
+    A ``d.*`` module draws on a monitor rather than writing a raster. The
+    bridge gives it a cairo monitor, imports the layers the form chose, and
+    turns the picture into a GeoTIFF on their grid, so the result arrives in
+    RustGIS as an ordinary raster layer of colours.
+    """
+    layers = call("host.layers") or []
+    ports, preview = raster.render_plan(entry, values, layers)
+    named = {port["name"] for port in ports}
+    form_values = {
+        name: value
+        for name, value in (values or {}).items()
+        if name not in named and name != raster.PREVIEW_FIELD
+    }
+    missing = raster.missing_form_values(entry, form_values)
+    if missing:
+        raise session.GrassError(
+            f"{entry['module']} needs {', '.join(missing)} before it can render"
+        )
+
+    imported, sources, exported, notes = {}, [], [], []
+    try:
+        for index, port in enumerate(ports, start=1):
+            maps = []
+            for layer in port["layers"]:
+                tag = f"-{index}-{len(exported) + 1}"
+                name = str(layer.get("name") or layer.get("id"))
+                if port["kind"] == "raster":
+                    path, source = export_source(name, values, tag=tag)[:2]
+                else:
+                    path, source = export_vector(name, tag=tag)
+                map_name = f"src{len(exported) + 1}"
+                exported.append(path)
+                sources.append((port["kind"], path, map_name))
+                maps.append(map_name)
+                notes += source
+            imported[port["name"]] = maps
+
+        label = str(ports[0]["layers"][0].get("name") or "display")
+        target = raster.output_path(label, entry["module"].replace(".", "-"))
+        preview_path = target[: -len(".tif")] + ".png" if preview else None
+        with session.DisplayRun(progress=progress) as run:
+            messages = run.render(
+                entry["module"],
+                raster.render_args(entry, values, imported),
+                sources,
+                target,
+                preview=preview_path,
+            )
+        messages = notes + messages
+    finally:
+        for path in exported:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+    added = call(
+        "layer.addData",
+        {"path": target, "name": f"{label} {entry['module']} (picture)"},
+    )
+    messages.append(f"The result is kept at {target}.")
+    for text in messages:
+        log(text)
+    call("host.notify", {"text": f"{entry['module']}: {messages[0]}"})
+    recent = raster.remember(entry["module"])
+    family = raster.mode_family(values.get("mode"))
+    nodes, tree_notes = raster.catalogue_tree(
+        catalogue, entry["module"], recent, family=family
+    )
+    return {
+        "layer": added,
+        "messages": messages + tree_notes,
+        "panel": {
+            "items": {
+                "modules": {"nodes": nodes},
+                "details": {"text": raster.module_details(entry)},
+                "form": {
+                    "fields": raster.render_form(
+                        entry, layers, chosen=values.get("raster")
+                    )
+                },
+                "status": {"text": "\n".join(messages + tree_notes)},
+            }
+        },
+    }
 
 
 def run_module_in_mapset(catalogue, entry, values):
@@ -394,6 +510,8 @@ def run_module(req, module=None):
     if not entry.get("runnable"):
         if entry.get("mapset_runnable"):
             return run_module_in_mapset(catalogue, entry, values)
+        if entry.get("render_runnable"):
+            return run_display_module(catalogue, entry, values)
         raise session.GrassError(
             f"{entry['module']} cannot be run from this panel: "
             f"{entry.get('reason') or 'its form cannot name what it needs'}"
@@ -586,6 +704,13 @@ def panel_state(req, mode=None):
         for entry in catalogue
         if entry.get("mapset_runnable") and not entry.get("runnable")
     )
+    renders = sum(
+        1
+        for entry in catalogue
+        if entry.get("render_runnable")
+        and not entry.get("runnable")
+        and not entry.get("mapset_runnable")
+    )
     if catalogue:
         status += (
             f" {runnable} of {len(catalogue)} modules run on the chosen raster "
@@ -596,11 +721,16 @@ def panel_state(req, mode=None):
                 f"; {in_mapset} more run with their form in a chosen GRASS "
                 "project and mapset"
             )
+        if renders:
+            status += f"; {renders} display modules render a picture"
         status += "; the tree gives the reason for the others."
         if family:
             status += f" Showing {family.lower()} modules only."
     chosen_module = raster.entry_for(catalogue, values.get("modules"), quietly=True)
-    if not nodes and not (chosen_module and chosen_module.get("mapset_runnable")):
+    if not nodes and not (
+        chosen_module
+        and (chosen_module.get("mapset_runnable") or chosen_module.get("render_runnable"))
+    ):
         status += " The map has no raster layer."
     module_nodes, _ = raster.catalogue_tree(
         catalogue,
@@ -626,7 +756,15 @@ def panel_state(req, mode=None):
                 "mode": {"nodes": raster.mode_nodes(catalogue)},
                 "modules": {"nodes": module_nodes},
                 "details": {"text": raster.module_details(chosen_module)},
-                "form": {"fields": raster.form_of(chosen_module)},
+                "form": {
+                    "fields": (
+                        raster.render_form(
+                            chosen_module, layers, chosen=chosen
+                        )
+                        if chosen_module and chosen_module.get("render_runnable")
+                        else raster.form_of(chosen_module)
+                    )
+                },
                 **database_panel(values.get("database")),
             },
         }
