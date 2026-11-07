@@ -329,13 +329,22 @@ class Run:
             raise GrassError(f"cannot create a project from {crs}: {_why(out)}")
         return path
 
-    def exec(self, project, module, *args, mapset="PERMANENT"):
-        """Run one module in ``project`` and return its standard output."""
+    def exec(self, project, module, *args, mapset="PERMANENT", env=None):
+        """Run one module in ``project`` and return its standard output.
+
+        :param env: environment variables for the module's own process, or
+            None to inherit the plugin's
+        """
         argv = [self.grass, os.path.join(project, mapset), "--exec", module, *args]
         allowed = self.left()
         try:
             out = subprocess.run(
-                argv, capture_output=True, text=True, check=False, timeout=allowed
+                argv,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=allowed,
+                env=env,
             )
         except subprocess.TimeoutExpired as e:
             raise GrassError(f"{module}: gave up after {allowed:.0f} seconds") from e
@@ -557,6 +566,19 @@ class DisplayRun(Run):
             self.exec(project, "g.region", "raster=" + ",".join(rasters), "-a")
         elif vectors:
             self.exec(project, "g.region", "vector=" + ",".join(vectors))
+            # A new project's region is one cell at its own resolution, which
+            # would give a one-pixel picture. Give the vectors about a
+            # thousand cells across, and let the cap below shrink that.
+            extent = self._region(project)
+            try:
+                span = max(
+                    float(extent["e"]) - float(extent["w"]),
+                    float(extent["n"]) - float(extent["s"]),
+                )
+                if span > 0:
+                    self.exec(project, "g.region", f"res={span / 1000.0!r}", "-a")
+            except (KeyError, ValueError):
+                pass
         region = self._region(project)
         try:
             west, south = float(region["w"]), float(region["s"])
@@ -577,28 +599,20 @@ class DisplayRun(Run):
             width = max(1, round(height * cols / rows))
 
         picture = os.path.join(self.dir, "display.png")
-        started = False
-        try:
-            self.exec(
-                project,
-                "d.mon",
-                "start=cairo",
-                f"output={picture}",
-                f"width={width}",
-                f"height={height}",
-                "--overwrite",
-            )
-            started = True
-            self.progress(f"Rendering {module}…")
-            self.exec(project, module, *args, "--overwrite", "--quiet")
-        finally:
-            if started:
-                try:
-                    self.exec(project, "d.mon", "stop=cairo")
-                except GrassError:
-                    # The picture may still be usable; the import below says
-                    # so if it is not.
-                    pass
+        # A monitor is state in the shell that started it, and every exec here
+        # is its own process, so draw straight to a file instead. GRASS calls
+        # this direct rendering; it needs no monitor and leaves no state.
+        env = dict(os.environ)
+        env.update(
+            {
+                "GRASS_RENDER_IMMEDIATE": "cairo",
+                "GRASS_RENDER_FILE": picture,
+                "GRASS_RENDER_WIDTH": str(width),
+                "GRASS_RENDER_HEIGHT": str(height),
+            }
+        )
+        self.progress(f"Rendering {module}…")
+        self.exec(project, module, *args, "--overwrite", "--quiet", env=env)
         if not os.path.exists(picture) or os.path.getsize(picture) == 0:
             raise GrassError(f"{module} drew no picture; its form may be missing a layer")
 
