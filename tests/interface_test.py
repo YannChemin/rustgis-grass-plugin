@@ -585,6 +585,23 @@ def test_a_temporal_module_runs_with_its_form_in_a_chosen_mapset():
     assert [f["id"] for f in fields] == ["variables", "prefix"]
 
 
+def test_a_long_description_becomes_a_short_label_with_the_full_text_as_help():
+    extra = """<parameter name="cache" type="string" required="no">
+      <description>Directory to permanently cache full-world ARCO-ERA5 monthly data in, reused across every future run regardless of the selected period.</description>
+    </parameter>"""
+    fields = interface.form_fields(temporal_task(extra))
+    field = next(f for f in fields if f["id"] == "cache")
+    assert len(field["label"]) <= 48
+    assert field["label"].endswith("…")
+    assert field["help"].startswith("Directory to permanently cache full-world")
+
+
+def test_a_display_module_says_it_needs_a_display_not_a_raster():
+    entry = interface.describe(raster_task(name="d.example"))
+    assert entry["runnable"] is False
+    assert entry["reason"] == "needs a display"
+
+
 def test_a_temporal_module_needing_a_dataset_says_the_form_cannot_name_it():
     extra = """<parameter name="input" type="string" required="yes">
       <description>Input space-time dataset</description>

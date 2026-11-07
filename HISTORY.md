@@ -345,6 +345,12 @@ import could never start.
 - `main.run_module()` refuses a module that is neither runnable on the chosen
   raster nor mapset-runnable, stating the catalogue's reason, instead of trying
   it on the raster anyway.
+- A form label is short (at most 48 characters) and the full GRASS description
+  is its tooltip; the panel wraps a label in a narrow column. Earlier, a long
+  description widened the whole column and pushed the value box out of the
+  pane, which made `t.in.era5`'s fields unreachable.
+- A display module (`d.*`) is refused with "needs a display" instead of the
+  misleading "takes no raster".
 - Created datasets are named by the module's own prefix parameter (t.in.era5's
   `output_prefix`); no required output name is invented.
 - A module command may now declare `"timeout"` seconds (1 to 86400) in
@@ -357,8 +363,8 @@ import could never start.
 
 ### Verification
 
-- `make check`: 110 tests pass (interface, raster, database, mapset run, form
-  validation and the refusal), and `ruff check` is clean.
+- `make check`: 112 tests pass (interface, raster, database, mapset run, form
+  labels, validation and the refusal), and `ruff check` is clean.
 - `cargo test -p rustgis-plugins`: 40 pass, 2 ignored, including
   `command_timeouts_are_bounded`.
 - Generated manifest: 88 raster modules, 91 mapset modules, 1,176 forms.

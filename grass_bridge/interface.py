@@ -290,6 +290,11 @@ def _runnability(task):
         "temporal": temporal,
     }
     out.update(_mapset_runnability(task))
+    # d.* modules open or drive a display, and Run Module has no display to
+    # give them: d.rast.edit would wait for an editor that never appears.
+    if family_of(task.get("name") or "") == "Display":
+        out["reason"] = "needs a display"
+        return out
     if not raster_ins:
         out["reason"] = "takes no raster"
         return out
@@ -344,12 +349,6 @@ def _runnability(task):
     if needs:
         out["needs"] = needs
         out["reason"] = _needs_text(needs)
-        return out
-
-    # d.* modules open or drive a display, and Run Module has no display to
-    # give them: d.rast.edit would wait for an editor that never appears.
-    if family_of(task.get("name") or "") == "Display":
-        out["reason"] = "needs a display"
         return out
 
     out["runnable"] = True
@@ -439,7 +438,7 @@ def _specs(xml_text):
         }
         description = _text(param.find("description"))
         written = _text(param.find("label"))
-        if written and description and written != description:
+        if description and description != written:
             spec["help"] = description
         if kind == "choice":
             spec["choices"] = _choices(param)
@@ -472,7 +471,7 @@ def _specs(xml_text):
             {
                 "name": f"flag_{name}",
                 "label": written or description or f"-{name}",
-                "help": description if written and description and written != description else "",
+                "help": description if description and description != written else "",
                 "kind": "bool",
                 "required": False,
                 "multiple": False,
@@ -544,13 +543,15 @@ def form_fields(xml_text):
         ):
             # A range or a list of numbers stays as it is written.
             kind = "text"
+        label = _short_label(spec["label"])
         field = {
             "id": spec["name"],
             "kind": kind,
-            "label": _clip(spec["label"], 200),
+            "label": _clip(label, 200),
         }
-        if spec.get("help"):
-            field["help"] = _clip(spec["help"], 2000)
+        help_text = spec.get("help") or (spec["label"] if label != spec["label"] else "")
+        if help_text:
+            field["help"] = _clip(help_text, 2000)
         if spec.get("required"):
             field["required"] = True
         if spec.get("integer") and kind == "number":
@@ -570,6 +571,24 @@ def form_fields(xml_text):
                 field["default"] = default
         out.append(field)
     return out
+
+
+def _short_label(text, limit=48):
+    """Return a label short enough to leave its value box reachable.
+
+    GRASS often has no separate ``<label>``, so the whole description would
+    become the field's label. Whatever is cut is kept as the field's help, so
+    nothing is lost.
+    """
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    for sep in ("; ", " -- ", " (", ". "):
+        cut = text.find(sep)
+        if 0 < cut <= limit:
+            return text[:cut].rstrip(" ,.;") + "…"
+    cut = text[:limit].rsplit(" ", 1)[0].rstrip(" ,.;")
+    return (cut or text[:limit]) + "…"
 
 
 def _clip(text, limit):
