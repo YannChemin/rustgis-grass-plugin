@@ -1234,14 +1234,6 @@ class RasterRun(session.Run):
             )
         return box
 
-    def _region(self, project):
-        """Return ``g.region -g`` as a dictionary."""
-        try:
-            lines = self.exec(project, "g.region", "-g").split()
-        except session.GrassError:
-            return {}
-        return {k: v for k, v in (line.split("=", 1) for line in lines if "=" in line)}
-
     def _project_point(self, project, centre, region):
         """Return the map's centre in the project's coordinates.
 

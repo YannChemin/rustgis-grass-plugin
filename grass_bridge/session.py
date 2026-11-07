@@ -347,6 +347,14 @@ class Run:
             self.warnings[text] = self.warnings.get(text, 0) + 1
         return out.stdout
 
+    def _region(self, project):
+        """Return ``g.region -g`` as a dictionary."""
+        try:
+            lines = self.exec(project, "g.region", "-g").split()
+        except GrassError:
+            return {}
+        return {k: v for k, v in (line.split("=", 1) for line in lines if "=" in line)}
+
     def mapset_module(self, base, project, mapset, module, args=()):
         """Run one module in the user's own project and mapset.
 
