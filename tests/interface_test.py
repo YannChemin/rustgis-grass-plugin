@@ -625,6 +625,46 @@ def test_a_temporal_module_needing_a_dataset_says_the_form_cannot_name_it():
     assert "space-time dataset" in entry["mapset_reason"]
 
 
+def test_an_in_place_raster_module_takes_maps_of_the_chosen_mapset():
+    xml = """<task name="r.colors">
+  <description>Creates/modifies the color table.</description>
+  <parameter name="map" type="string" required="no" multiple="yes">
+    <description>Name of raster map(s)</description>
+    <gisprompt age="old" element="cell" prompt="raster" />
+  </parameter>
+  <parameter name="raster" type="string" required="no">
+    <description>Raster map from which to copy color table</description>
+    <gisprompt age="old" element="cell" prompt="raster" />
+  </parameter>
+  <parameter name="color" type="string" required="no">
+    <description>Name of color table</description>
+    <values><value><name>grey</name></value></values>
+  </parameter>
+</task>"""
+    entry = interface.describe(xml)
+    assert entry["mapset_runnable"] is True
+    assert [port["name"] for port in entry["mapset_inputs"]] == ["map", "raster"]
+    assert entry["runnable"] is False
+    assert entry["reason"] == "writes no raster"
+
+
+def test_an_addon_that_mislabels_its_output_is_not_an_in_place_run():
+    xml = """<task name="r.agent.aco">
+  <description>Runs an ant colony optimisation.</description>
+  <parameter name="outputmap" type="string" required="yes">
+    <description>Output raster</description>
+    <gisprompt age="old" element="cell" prompt="raster" />
+  </parameter>
+  <parameter name="costmap" type="string" required="yes">
+    <description>Cost raster</description>
+    <gisprompt age="old" element="cell" prompt="raster" />
+  </parameter>
+</task>"""
+    entry = interface.describe(xml)
+    assert entry["mapset_runnable"] is False
+    assert "raster or vector" in entry["mapset_reason"]
+
+
 def test_a_required_output_name_is_not_something_the_form_can_fill():
     extra = """<parameter name="output" type="string" required="yes">
       <description>Output raster</description>
