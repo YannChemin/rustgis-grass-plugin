@@ -348,58 +348,59 @@ def export_vector(name, tag=""):
 
 
 def run_display_module(catalogue, entry, values):
-    """Render a display module over the layers its form names.
+    """Render a display module over maps of the chosen GRASS mapset.
 
     A ``d.*`` module draws on a monitor rather than writing a raster. The
-    bridge gives it a cairo monitor, imports the layers the form chose, and
-    turns the picture into a GeoTIFF on their grid, so the result arrives in
-    RustGIS as an ordinary raster layer of colours.
+    bridge draws it in a throwaway mapset of the chosen GRASS project, reads
+    the maps from the selected mapset, and turns the picture into a GeoTIFF,
+    so the result arrives in RustGIS as an ordinary raster layer of colours.
     """
-    layers = call("host.layers") or []
+    base = database.gisdbase()
+    if not base:
+        raise session.GrassError(
+            "no GRASS database was found: GISDBASE is not set, GRASS's settings "
+            "file names none, and there is no ~/grassdata"
+        )
+    target_mapset = database.chosen_mapset(base, values.get("database"))
+    if not target_mapset:
+        raise session.GrassError(
+            f"{entry['module']} draws maps from one GRASS mapset: choose the "
+            "project and mapset under Projects and mapsets."
+        )
+    project, mapset = target_mapset
+    maps = database.maps(base, project, mapset)
     form = values.get("form") if isinstance(values.get("form"), dict) else {}
-    ports, preview = raster.render_plan(entry, values, layers)
+    ports, preview = raster.render_plan(entry, values, maps, mapset)
     missing = raster.missing_form_values(entry, form)
     if missing:
         raise session.GrassError(
             f"{entry['module']} needs {', '.join(missing)} before it can render"
         )
 
-    imported, sources, exported, notes = {}, [], [], []
-    try:
-        for index, port in enumerate(ports, start=1):
-            maps = []
-            for layer in port["layers"]:
-                tag = f"-{index}-{len(exported) + 1}"
-                name = str(layer.get("name") or layer.get("id"))
-                if port["kind"] == "raster":
-                    path, source = export_source(name, values, tag=tag)[:2]
-                else:
-                    path, source = export_vector(name, tag=tag)
-                map_name = f"src{len(exported) + 1}"
-                exported.append(path)
-                sources.append((port["kind"], path, map_name))
-                maps.append(map_name)
-                notes += source
-            imported[port["name"]] = maps
+    imported = {
+        port["name"]: [f"{name}@{mapset}" for name in port["maps"]]
+        for port in ports
+    }
+    rasters, vectors = [], []
+    for port in ports:
+        into = rasters if port["kind"] == "raster" else vectors
+        into += imported[port["name"]]
 
-        label = str(ports[0]["layers"][0].get("name") or "display")
-        target = raster.output_path(label, entry["module"].replace(".", "-"))
-        preview_path = target[: -len(".tif")] + ".png" if preview else None
-        with session.DisplayRun(progress=progress) as run:
-            messages = run.render(
-                entry["module"],
-                raster.render_args(entry, form, imported),
-                sources,
-                target,
-                preview=preview_path,
-            )
-        messages = notes + messages
-    finally:
-        for path in exported:
-            try:
-                os.remove(path)
-            except OSError:
-                pass
+    label = str(ports[0]["maps"][0])
+    target = raster.output_path(label, entry["module"].replace(".", "-"))
+    preview_path = target[: -len(".tif")] + ".png" if preview else None
+    with session.DisplayRun(progress=progress) as run:
+        messages = run.render_mapset(
+            base,
+            project,
+            mapset,
+            entry["module"],
+            raster.render_args(entry, form, imported),
+            rasters,
+            vectors,
+            target,
+            preview=preview_path,
+        )
 
     added = call(
         "layer.addData",
@@ -421,12 +422,9 @@ def run_display_module(catalogue, entry, values):
             "items": {
                 "modules": {"nodes": nodes},
                 "details": {"text": raster.module_details(entry)},
-                "form": {
-                    "fields": raster.render_form(
-                        entry, layers, chosen=values.get("raster")
-                    )
-                },
+                "form": {"fields": raster.render_form(entry, maps, mapset)},
                 "status": {"text": "\n".join(messages + tree_notes)},
+                **database_panel(values.get("database")),
             }
         },
     }
@@ -722,20 +720,28 @@ def panel_state(req, mode=None):
         if family:
             status += f" Showing {family.lower()} modules only."
     chosen_module = raster.entry_for(catalogue, values.get("modules"), quietly=True)
-    render_needs_raster = bool(
-        chosen_module
-        and chosen_module.get("render_runnable")
-        and any(
-            port.get("kind") == "raster"
-            for port in chosen_module.get("render_inputs") or []
-        )
-    )
+    render_maps, render_mapset, render_project = [], "", ""
+    if chosen_module and chosen_module.get("render_runnable"):
+        base = database.gisdbase()
+        target = database.chosen_mapset(base, values.get("database")) if base else None
+        if target:
+            render_project, render_mapset = target
+            render_maps = database.maps(base, render_project, render_mapset)
+        if not base:
+            status += (
+                " No GRASS database was found; a display module needs the maps "
+                "in one."
+            )
+        elif not target:
+            status += (
+                " Choose a project and mapset under Projects and mapsets; a "
+                "display module draws maps from one mapset."
+            )
+        elif not render_maps:
+            status += f" {render_project}/{render_mapset} has no maps to draw."
     if not nodes and not (
         chosen_module
-        and (
-            chosen_module.get("mapset_runnable")
-            or (chosen_module.get("render_runnable") and not render_needs_raster)
-        )
+        and (chosen_module.get("mapset_runnable") or chosen_module.get("render_runnable"))
     ):
         status += " The map has no raster layer."
     module_nodes, _ = raster.catalogue_tree(
@@ -765,7 +771,7 @@ def panel_state(req, mode=None):
                 "form": {
                     "fields": (
                         raster.render_form(
-                            chosen_module, layers, chosen=chosen
+                            chosen_module, render_maps, render_mapset
                         )
                         if chosen_module and chosen_module.get("render_runnable")
                         else raster.form_of(chosen_module)

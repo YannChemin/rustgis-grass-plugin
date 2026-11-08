@@ -18,6 +18,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -498,9 +499,148 @@ class Run:
         return result, list(self.messages)
 
 
-#: The most pixels one side of a rendered display may have. A cairo render is
-#: a screenshot, not a computation: it is capped for time and file size.
-RENDER_MAX_PIXELS = 2048
+#: The Python run inside ``grass --tmp-mapset`` to turn a display module's
+#: picture into a GeoTIFF. It lives outside the plugin so no GRASS Python
+#: package is needed: every step is a GRASS module run as a subprocess.
+_DISPLAY_SCRIPT = r"""
+import json
+import os
+import subprocess
+import sys
+
+job = json.load(open(sys.argv[1], encoding="utf-8"))
+
+
+def call(module, *args, env=None):
+    done = subprocess.run(
+        [module, *args], capture_output=True, text=True, check=False, env=env
+    )
+    if done.stderr:
+        sys.stderr.write(done.stderr)
+    if done.returncode:
+        sys.exit(done.returncode)
+    return done.stdout
+
+
+def region():
+    text = call("g.region", "-g")
+    return {
+        key: value
+        for line in text.split()
+        for key, value in [line.split("=", 1)]
+        if "=" in line
+    }
+
+
+present = call("g.mapsets", "-p").split()
+if job.get("mapset") and job["mapset"] not in present:
+    # A mapset outside the search path answers to no bare name; add it so the
+    # maps named name@mapset resolve from the throwaway mapset.
+    call("g.mapsets", "mapset=" + job["mapset"], "operation=add", "--quiet")
+
+rasters = job["rasters"]
+vectors = job["vectors"]
+if rasters:
+    call("g.region", "raster=" + ",".join(rasters), "-a")
+elif vectors:
+    call("g.region", "vector=" + ",".join(vectors))
+    extent = region()
+    try:
+        span = max(
+            float(extent["e"]) - float(extent["w"]),
+            float(extent["n"]) - float(extent["s"]),
+        )
+    except (KeyError, ValueError):
+        span = 0.0
+    if span > 0:
+        call("g.region", "res=" + repr(span / 1000.0), "-a")
+else:
+    sys.exit("no map to draw")
+
+extent = region()
+try:
+    west, south = float(extent["w"]), float(extent["s"])
+    east, north = float(extent["e"]), float(extent["n"])
+    cols, rows = int(float(extent["cols"])), int(float(extent["rows"]))
+except (KeyError, ValueError):
+    sys.exit("the display has no readable region")
+if cols < 1 or rows < 1 or west >= east or south >= north:
+    sys.exit("the display region has no area")
+
+limit = int(job["max_pixels"])
+if cols >= rows:
+    width = min(cols, limit)
+    height = max(1, round(width * rows / cols))
+else:
+    height = min(rows, limit)
+    width = max(1, round(height * cols / rows))
+
+picture = job["picture"]
+env = dict(os.environ)
+env.update(
+    {
+        "GRASS_RENDER_IMMEDIATE": "cairo",
+        "GRASS_RENDER_FILE": picture,
+        "GRASS_RENDER_WIDTH": str(width),
+        "GRASS_RENDER_HEIGHT": str(height),
+    }
+)
+call(job["module"], *job["args"], "--overwrite", "--quiet", env=env)
+if not os.path.exists(picture) or os.path.getsize(picture) == 0:
+    sys.exit(job["module"] + " drew no picture; its form may be missing a map")
+
+xres = (east - west) / width
+yres = (north - south) / height
+world = os.path.splitext(picture)[0] + ".pgw"
+with open(world, "w", encoding="utf-8") as fh:
+    fh.write(
+        repr(xres) + "\n0\n0\n" + repr(-yres) + "\n"
+        + repr(west + xres / 2.0) + "\n" + repr(north - yres / 2.0) + "\n"
+    )
+
+call(
+    "r.in.gdal",
+    "input=" + picture,
+    "output=render",
+    "-o",
+    "--overwrite",
+    "--quiet",
+)
+call(
+    "g.region",
+    "n=" + repr(north),
+    "s=" + repr(south),
+    "e=" + repr(east),
+    "w=" + repr(west),
+    "rows=" + str(height),
+    "cols=" + str(width),
+)
+call(
+    "r.out.gdal",
+    "input=render",
+    "output=" + job["target"],
+    "format=GTiff",
+    "-c",
+    "--overwrite",
+    "--quiet",
+)
+if not os.path.exists(job["target"]):
+    sys.exit(job["module"] + " wrote no GeoTIFF at " + job["target"])
+
+print(
+    json.dumps(
+        {
+            "picture": picture,
+            "width": width,
+            "height": height,
+            "west": west,
+            "south": south,
+            "east": east,
+            "north": north,
+        }
+    )
+)
+"""
 
 
 class DisplayRun(Run):
@@ -517,6 +657,115 @@ class DisplayRun(Run):
         super().__init__(
             grass=grass, progress=progress, deadline=time.monotonic() + budget
         )
+
+    def render_mapset(
+        self,
+        base,
+        project,
+        mapset,
+        module,
+        args,
+        rasters,
+        vectors,
+        target,
+        preview=None,
+    ):
+        """Render a display module over maps of one of the user's mapsets.
+
+        The module runs in a throwaway mapset of the user's project, so it
+        reads ``name@mapset`` without locking or writing the user's mapset.
+        Nothing is imported into RustGIS except the picture that becomes the
+        returned GeoTIFF.
+
+        :param base: the GRASS database
+        :param project: the project's name
+        :param mapset: the mapset holding the maps to draw
+        :param module: the GRASS display module, such as ``d.rgb``
+        :param args: its ``name=value`` and ``-flag`` arguments
+        :param rasters: the raster maps to draw, as ``name@mapset``
+        :param vectors: the vector maps to draw, as ``name@mapset``
+        :param target: where to write the GeoTIFF
+        :param preview: where to keep the PNG, or None to let it go with the run
+        :return: ``[message, ...]``
+        :raises GrassError: when the project or mapset is missing, or a step fails
+        """
+        project_path = os.path.join(base, project)
+        if not os.path.isdir(os.path.join(project_path, mapset)):
+            raise GrassError(f"{project}/{mapset} is not a GRASS mapset")
+        picture = os.path.join(self.dir, "display.png")
+        job = {
+            "module": module,
+            "args": list(args),
+            "mapset": mapset,
+            "rasters": list(rasters),
+            "vectors": list(vectors),
+            "target": target,
+            "picture": picture,
+            "max_pixels": RENDER_MAX_PIXELS,
+        }
+        job_path = os.path.join(self.dir, "display-job.json")
+        with open(job_path, "w", encoding="utf-8") as fh:
+            json.dump(job, fh)
+        script = os.path.join(self.dir, "display-script.py")
+        with open(script, "w", encoding="utf-8") as fh:
+            fh.write(_DISPLAY_SCRIPT)
+
+        self.progress(f"Rendering {module} from {project}/{mapset}…")
+        argv = [
+            self.grass,
+            "--tmp-mapset",
+            project_path + os.sep,
+            "--exec",
+            sys.executable,
+            script,
+            job_path,
+        ]
+        allowed = self.left()
+        try:
+            out = subprocess.run(
+                argv,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=allowed,
+            )
+        except subprocess.TimeoutExpired as e:
+            raise GrassError(f"{module}: gave up after {allowed:.0f} seconds") from e
+        except OSError as e:
+            raise GrassError(f"{module}: {e}") from e
+        if out.returncode != 0:
+            raise GrassError(f"{module}: {_why(out)}")
+        for text in _warnings(out.stderr or ""):
+            self.warnings[text] = self.warnings.get(text, 0) + 1
+        lines = [line for line in (out.stdout or "").splitlines() if line.strip()]
+        try:
+            result = json.loads(lines[-1])
+        except (IndexError, ValueError) as e:
+            raise GrassError(f"{module}: the render reported no result") from e
+        if preview:
+            shutil.copyfile(result["picture"], preview)
+
+        west, south = result["west"], result["south"]
+        east, north = result["east"], result["north"]
+        width, height = result["width"], result["height"]
+        messages = [
+            f"{module} rendered a {width} by {height} picture from {project}/{mapset}.",
+            (
+                f"The picture spans {west:g} to {east:g} east and {south:g} to "
+                f"{north:g} north, on the grid of the maps it drew."
+            ),
+            (
+                f"It is a GeoTIFF at {target}, holding colours rather than the "
+                "input's values; the raster modules will treat those colours as data."
+            ),
+        ]
+        if preview:
+            messages.append(f"The PNG preview is kept at {preview}.")
+        for text, count in self.warnings.items():
+            messages.append(
+                f"GRASS: {text}" + (f" ({count} times)" if count > 1 else "")
+            )
+        return messages
 
     def render(self, module, args, layers, target, preview=None):
         """Render one display module over imported layers.

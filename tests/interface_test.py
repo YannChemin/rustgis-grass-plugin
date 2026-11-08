@@ -635,43 +635,28 @@ def test_a_required_output_name_is_not_something_the_form_can_fill():
     assert "output name" in entry["mapset_reason"]
 
 
-def test_the_panel_renders_a_display_module_from_its_layer_fields(
+def test_the_panel_renders_a_display_module_from_the_chosen_mapset(
     monkeypatch, tmp_path
 ):
     import main
 
+    base = tmp_path / "db"
+    mapset = base / "P" / "PERMANENT"
+    (mapset / "cellhd").mkdir(parents=True)
+    (mapset / "WIND").write_text("")
+    (mapset / "cellhd" / "DEM").write_text("")
+    (mapset / "vector" / "Roads").mkdir(parents=True)
+    monkeypatch.setenv("GISDBASE", str(base))
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
-    layers = [
-        {"id": 1, "name": "DEM", "raster": True, "active": True},
-        {
-            "id": 2,
-            "name": "Roads",
-            "raster": False,
-            "geometry": "Polygon",
-            "active": False,
-        },
-    ]
     monkeypatch.setattr(
         main,
         "call",
         lambda op, params=None: (
-            layers
-            if op == "host.layers"
-            else {"id": 9, "name": params.get("name")}
-            if op == "layer.addData"
-            else {}
+            {"id": 9, "name": params.get("name")} if op == "layer.addData" else {}
         ),
     )
     monkeypatch.setattr(main, "progress", lambda text: None)
     monkeypatch.setattr(main, "log", lambda text: None)
-
-    exported = tmp_path / "roads.geojson"
-
-    def export_vector(name, tag=""):
-        exported.write_text("{}")
-        return str(exported), []
-
-    monkeypatch.setattr(main, "export_vector", export_vector)
     seen = {}
 
     class FakeDisplayRun:
@@ -684,9 +669,28 @@ def test_the_panel_renders_a_display_module_from_its_layer_fields(
         def __exit__(self, *args):
             pass
 
-        def render(self, module, args, layers, target, preview=None):
+        def render_mapset(
+            self,
+            base,
+            project,
+            mapset,
+            module,
+            args,
+            rasters,
+            vectors,
+            target,
+            preview=None,
+        ):
             seen.update(
-                module=module, args=args, layers=layers, target=target, preview=preview
+                base=base,
+                project=project,
+                mapset=mapset,
+                module=module,
+                args=args,
+                rasters=rasters,
+                vectors=vectors,
+                target=target,
+                preview=preview,
             )
             pathlib.Path(target).write_text("tif")
             return [f"{module} rendered a picture."]
@@ -717,15 +721,20 @@ def test_the_panel_renders_a_display_module_from_its_layer_fields(
         entry,
         {
             "raster": "1",
+            "database": "mapset/P/PERMANENT",
             "form": {"map": "Roads", "color": "red"},
             "mode": "mode/all",
         },
     )
+    assert seen["base"] == str(base)
+    assert seen["project"] == "P"
+    assert seen["mapset"] == "PERMANENT"
     assert seen["module"] == "d.vect"
-    assert seen["args"] == ["map=src1", "color=red"]
-    assert seen["layers"] == [("vector", str(exported), "src1")]
+    assert seen["args"] == ["map=Roads@PERMANENT", "color=red"]
+    assert seen["rasters"] == []
+    assert seen["vectors"] == ["Roads@PERMANENT"]
     assert seen["target"].endswith(".tif")
-    assert not exported.exists()
+    assert seen["preview"] is None
     assert answer["layer"]["id"] == 9
     assert answer["panel"]["items"]["form"]["fields"][0]["id"] == "map"
 

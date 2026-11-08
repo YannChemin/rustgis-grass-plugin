@@ -748,9 +748,9 @@ def display_entry(module="d.vect", **fields):
     )
 
 
-def test_a_render_form_asks_for_each_layer_the_chosen_raster_cannot_fill():
-    layers = [layer(1, "DEM"), vector_layer(2, "Roads")]
-    fields = raster.render_form(display_entry(), layers, chosen="1")
+def test_a_render_form_asks_for_each_map_kind_of_the_chosen_mapset():
+    maps = [("raster", "DEM"), ("vector", "Roads")]
+    fields = raster.render_form(display_entry(), maps, "PERMANENT")
     by = {f["id"]: f for f in fields}
     assert by["map"]["kind"] == "select"
     assert by["map"]["choices"] == ["Roads"]
@@ -759,16 +759,25 @@ def test_a_render_form_asks_for_each_layer_the_chosen_raster_cannot_fill():
     assert by[raster.PREVIEW_FIELD]["default"] is False
 
 
+def test_a_render_form_keeps_a_field_whose_kind_the_mapset_lacks():
+    maps = [("raster", "DEM")]
+    fields = raster.render_form(display_entry(), maps, "PERMANENT")
+    by = {f["id"]: f for f in fields}
+    assert by["map"]["choices"] == ["(no vector maps in the PERMANENT mapset)"]
+    assert by["map"]["required"] is True
+    assert "Choose a vector map" in by["map"]["help"]
+
+
 def test_a_render_form_does_not_ask_twice_for_the_vector_map():
-    layers = [vector_layer(2, "Roads")]
+    maps = [("vector", "Roads")]
     fields = raster.render_form(
-        display_entry(form=[{"id": "map", "kind": "text"}]), layers
+        display_entry(form=[{"id": "map", "kind": "text"}]), maps
     )
     assert [f["id"] for f in fields].count("map") == 1
 
 
-def test_a_render_plan_takes_the_chosen_raster_by_id_and_layers_by_name():
-    layers = [layer(1, "DEM"), vector_layer(2, "Roads")]
+def test_a_render_plan_takes_each_input_by_name_from_the_one_mapset():
+    maps = [("raster", "DEM"), ("vector", "Roads")]
     ports, preview = raster.render_plan(
         {
             "module": "d.vect",
@@ -784,15 +793,26 @@ def test_a_render_plan_takes_the_chosen_raster_by_id_and_layers_by_name():
             ],
         },
         {"raster": "1", "map": "Roads", raster.PREVIEW_FIELD: True},
-        layers,
+        maps,
+        "PERMANENT",
     )
-    assert ports[0]["layers"][0]["name"] == "Roads"
+    assert ports[0]["maps"] == ["Roads"]
+    assert ports[0]["kind"] == "vector"
     assert preview is True
+
+
+def test_a_render_plan_refuses_a_map_of_another_mapset():
+    maps = [("raster", "DEM"), ("vector", "Roads")]
+    with pytest.raises(session.GrassError) as e:
+        raster.render_plan(
+            display_entry(), {"map": "Roads@elsewhere"}, maps, "PERMANENT"
+        )
+    assert "not a vector map of the PERMANENT mapset" in str(e.value)
 
 
 def test_a_render_plan_names_a_missing_required_layer():
     with pytest.raises(session.GrassError) as e:
-        raster.render_plan(display_entry(), {}, [layer(1, "DEM")])
+        raster.render_plan(display_entry(), {}, [("raster", "DEM")], "PERMANENT")
     assert "map" in str(e.value).lower()
 
 
@@ -843,7 +863,7 @@ def test_a_render_module_is_in_runs_from_here_and_says_it_renders():
     assert "Renders a picture" in raster.module_details(display_entry())
 
 
-def test_a_render_form_shows_the_first_raster_only_when_none_is_chosen():
+def test_a_render_form_offers_a_none_for_an_optional_input():
     display = entry(
         "d.rast",
         "Display",
@@ -855,14 +875,12 @@ def test_a_render_form_shows_the_first_raster_only_when_none_is_chosen():
                 "kind": "raster",
                 "label": "Name of raster map",
                 "help": "",
-                "required": True,
+                "required": False,
                 "multiple": False,
             }
         ],
     )
-    layers = [layer(1, "DEM")]
-    chosen = raster.render_form(display, layers, chosen="1")
-    assert "map" not in [field["id"] for field in chosen]
-    unchosen = raster.render_form(display, layers)
-    by = {field["id"]: field for field in unchosen}
-    assert by["map"]["choices"] == ["DEM"] and by["map"]["required"] is True
+    fields = raster.render_form(display, [("raster", "DEM")], "PERMANENT")
+    by = {field["id"]: field for field in fields}
+    assert by["map"]["choices"] == ["none", "DEM"]
+    assert by["map"]["default"] == "none"

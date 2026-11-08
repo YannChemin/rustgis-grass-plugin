@@ -693,18 +693,9 @@ def missing_form_values(entry, values):
 PREVIEW_FIELD = "preview_png"
 
 
-def _layer_choices(layers, kind):
-    """Return the project's layer names that can fill a ``kind`` input."""
-    out = []
-    for layer in layers or []:
-        if kind == "raster":
-            usable = bool(layer.get("raster"))
-        else:
-            usable = not layer.get("raster") and bool(layer.get("geometry"))
-        name = str(layer.get("name") or layer.get("id") or "")
-        if usable and name and name not in out:
-            out.append(name)
-    return out
+def _map_names(maps, kind):
+    """Return the names of the ``kind`` maps in a ``[(kind, name), ...]`` list."""
+    return [name for map_kind, name in (maps or []) if map_kind == kind]
 
 
 def _with_form(values):
@@ -721,52 +712,54 @@ def _with_form(values):
     return values
 
 
-def _find_layer(layers, text, kind):
-    """Return the project layer whose name or id is ``text``, or None."""
-    for layer in layers or []:
-        if kind == "raster" and not layer.get("raster"):
-            continue
-        if kind == "vector" and (layer.get("raster") or not layer.get("geometry")):
-            continue
-        if text in (str(layer.get("name")), str(layer.get("id"))):
-            return layer
-    return None
-
-
-def render_form(entry, layers, chosen=None):
+def render_form(entry, maps, mapset=None):
     """Return the form fields for a display module that renders a picture.
 
-    The module's own parameters are kept, and one field is added for each
-    layer input the module declares: the chosen raster fills the first single
-    raster input, and every vector (and any further raster) is chosen here.
+    The module's own parameters are kept, and one field is added for each map
+    input the module declares. The choices are the maps of one GRASS mapset,
+    because a display module reads maps from the project's database, not the
+    RustGIS project's layers.
 
     :param entry: a catalogue entry with ``render_inputs``
-    :param layers: ``host.layers``, the project's layers
-    :param chosen: the raster layer id picked in the tree, if any
+    :param maps: ``database.maps``, the chosen mapset's ``[(kind, name), ...]``
+    :param mapset: the chosen mapset's name, for a missing-kind message
     :return: the fields the panel shows
     """
     inputs = list((entry or {}).get("render_inputs") or [])
-    raster_ports = [port for port in inputs if port.get("kind") == "raster"]
-    first_raster = raster_ports[0] if raster_ports else None
+    where = f"the {mapset} mapset" if mapset else "the chosen mapset"
     fields = []
     for port in inputs:
         kind = port.get("kind")
-        # The panel's chosen raster fills the first single raster input; there
-        # is no second question to ask about it. Without a chosen raster the
-        # field is shown, so a picture can still be made from several rasters.
-        if (
-            kind == "raster"
-            and port is first_raster
-            and not port.get("multiple")
-            and chosen
-        ):
-            continue
-        choices = _layer_choices(layers, kind)
-        # A required input with no layer of its kind is left out: the reason
-        # it cannot run comes from render_plan, not from an empty choice list.
-        if not choices and port.get("required"):
-            continue
+        choices = _map_names(maps, kind)
         label = interface._short_label(port.get("label") or port.get("name") or "")
+        help_text = port.get("help") or ""
+        if not choices:
+            # Keep the field visible when the mapset has no map of that kind:
+            # hiding it leaves only the flags and no clue why they are alone.
+            missing = f"(no {kind} maps in {where})"
+            if port.get("multiple"):
+                field = {
+                    "id": port["name"],
+                    "kind": "multi",
+                    "label": label,
+                    "choices": [missing],
+                }
+            else:
+                field = {
+                    "id": port["name"],
+                    "kind": "select",
+                    "label": label,
+                    "choices": [missing],
+                }
+            if port.get("required"):
+                field["required"] = True
+            field["help"] = (
+                (help_text + " " if help_text else "")
+                + f"Choose a {kind} map from the mapset selected under "
+                "Projects and mapsets."
+            )[:2000]
+            fields.append(field)
+            continue
         if port.get("multiple"):
             field = {
                 "id": port["name"],
@@ -774,8 +767,8 @@ def render_form(entry, layers, chosen=None):
                 "label": label,
                 "choices": choices[:256],
             }
-            if port.get("help"):
-                field["help"] = port["help"][:2000]
+            if help_text:
+                field["help"] = help_text[:2000]
             if port.get("required"):
                 field["required"] = True
             elif len(choices) == 1:
@@ -789,8 +782,8 @@ def render_form(entry, layers, chosen=None):
             "label": label,
             "choices": values[:256],
         }
-        if port.get("help"):
-            field["help"] = port["help"][:2000]
+        if help_text:
+            field["help"] = help_text[:2000]
         if port.get("required"):
             field["required"] = True
             if len(choices) == 1:
@@ -815,27 +808,32 @@ def render_form(entry, layers, chosen=None):
     return fields[: interface.MAX_FORM_FIELDS]
 
 
-def render_plan(entry, values, layers):
-    """Resolve a display module's form into the layers it will draw.
+def render_plan(entry, values, maps, mapset=None):
+    """Resolve a display module's form into the maps it will draw.
+
+    Every input must name a map of the same mapset: a display module reads
+    GRASS maps, and its choices come from the mapset selected under Projects
+    and mapsets.
 
     :param entry: a catalogue entry with ``render_inputs``
     :param values: the panel's form values
-    :param layers: ``host.layers``, the project's layers
+    :param maps: ``database.maps``, the chosen mapset's ``[(kind, name), ...]``
+    :param mapset: the chosen mapset's name, for error messages
     :return: ``(ports, preview)``, where each port is
-        ``{"name", "kind", "multiple", "layers"}`` and ``preview`` says
+        ``{"name", "kind", "multiple", "maps"}`` and ``preview`` says
         whether to keep the PNG
     :raises session.GrassError: when a required input is missing or names no
-        layer of the project
+        map of the chosen mapset
     """
     values = _with_form(values)
     inputs = (entry or {}).get("render_inputs") or []
-    raster_ports = [port for port in inputs if port.get("kind") == "raster"]
-    first_raster = raster_ports[0] if raster_ports else None
+    by_kind = {
+        kind: set(_map_names(maps, kind)) for kind in ("raster", "vector")
+    }
     ports, missing = [], []
     for port in inputs:
         name, kind = port["name"], port.get("kind")
         raw = values.get(name)
-        names = []
         if port.get("multiple"):
             parts = raw.split(",") if isinstance(raw, str) else (raw or [])
             names = [
@@ -845,22 +843,15 @@ def render_plan(entry, values, layers):
             ]
         else:
             text = str(raw or "").strip()
-            if text and text != "none":
-                names = [text]
-            elif (
-                kind == "raster"
-                and port is first_raster
-                and str(values.get("raster") or "").strip()
-            ):
-                names = [str(values.get("raster"))]
+            names = [text] if text and text != "none" else []
         picked = []
         for text in names:
-            layer = _find_layer(layers, text, kind)
-            if layer is None:
+            if text not in by_kind.get(kind, set()):
+                where = f"the {mapset} mapset" if mapset else "the chosen mapset"
                 raise session.GrassError(
-                    f"{entry['module']}: {text} is not a {kind} layer of this project"
+                    f"{entry['module']}: {text} is not a {kind} map of {where}"
                 )
-            picked.append(layer)
+            picked.append(text)
         if not picked and port.get("required"):
             missing.append(port.get("label") or name)
         if picked:
@@ -869,7 +860,7 @@ def render_plan(entry, values, layers):
                     "name": name,
                     "kind": kind,
                     "multiple": bool(port.get("multiple")),
-                    "layers": picked,
+                    "maps": picked,
                 }
             )
     if missing:
@@ -877,7 +868,7 @@ def render_plan(entry, values, layers):
             f"{entry['module']} needs {', '.join(missing)} before it can render"
         )
     if not ports:
-        raise session.GrassError(f"{entry['module']} needs a layer to draw")
+        raise session.GrassError(f"{entry['module']} needs a map to draw")
     return ports, bool(values.get(PREVIEW_FIELD))
 
 
