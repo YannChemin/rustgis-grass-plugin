@@ -648,6 +648,7 @@ def build():
                 # one out.
                 "mapset_runnable": described["mapset_runnable"],
                 "mapset_reason": described["mapset_reason"],
+                "mapset_inputs": described["mapset_inputs"],
                 # A display module that can draw a picture from its form: the
                 # bridge gives it a cairo monitor and imports the picture.
                 "render_runnable": described["render_runnable"],
