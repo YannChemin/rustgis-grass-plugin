@@ -251,12 +251,17 @@ def browse_database(req):
     items = database_panel(chosen)
     catalogue = load_catalogue().get("catalogue") or []
     module = raster.entry_for(catalogue, values.get("modules"), quietly=True)
-    if module and module.get("render_runnable"):
+    if module and (module.get("render_runnable") or module.get("mapset_inputs")):
         base = database.gisdbase()
         target = database.chosen_mapset(base, chosen) if base else None
         maps = database.maps(base, *target) if target else []
+        mapset = target[1] if target else ""
         items["form"] = {
-            "fields": raster.render_form(module, maps, target[1] if target else "")
+            "fields": (
+                raster.render_form(module, maps, mapset)
+                if module.get("render_runnable")
+                else raster.mapset_form(module, maps, mapset)
+            )
         }
     return {"panel": {"items": items, "values": {"database": chosen}}}
 
@@ -466,14 +471,17 @@ def run_module_in_mapset(catalogue, entry, values):
             f"{entry['module']} runs in a GRASS mapset: choose the project and "
             "mapset it should write to under Projects and mapsets."
         )
+    project, mapset = target
+    maps = database.maps(base, project, mapset)
+    ports = raster.mapset_plan(entry, values, maps, mapset)
     form = values.get("form") or {}
     missing = raster.missing_form_values(entry, form)
     if missing:
         raise session.GrassError(
             f"{entry['module']} needs {', '.join(missing)} before it can run"
         )
-    args = raster.form_args(entry, form)
-    project, mapset = target
+    imported = {port["name"]: port["maps"] for port in ports}
+    args = raster.mapset_args(entry, form, imported)
     with session.Run(progress=progress) as run:
         messages = run.mapset_module(
             base, project, mapset, entry["module"], args
@@ -492,7 +500,7 @@ def run_module_in_mapset(catalogue, entry, values):
             "items": {
                 "modules": {"nodes": nodes},
                 "details": {"text": raster.module_details(entry)},
-                "form": {"fields": raster.form_of(entry)},
+                "form": {"fields": raster.mapset_form(entry, maps, mapset)},
                 "status": {"text": "\n".join(messages + notes)},
                 **database_panel(values.get("database")),
             }
@@ -737,7 +745,14 @@ def panel_state(req, mode=None):
             status += f" Showing {family.lower()} modules only."
     chosen_module = raster.entry_for(catalogue, values.get("modules"), quietly=True)
     render_maps, render_mapset, render_project = [], "", ""
-    if chosen_module and chosen_module.get("render_runnable"):
+    needs_maps = bool(
+        chosen_module
+        and (
+            chosen_module.get("render_runnable")
+            or chosen_module.get("mapset_inputs")
+        )
+    )
+    if needs_maps:
         base = database.gisdbase()
         target = database.chosen_mapset(base, values.get("database")) if base else None
         if target:
@@ -745,16 +760,15 @@ def panel_state(req, mode=None):
             render_maps = database.maps(base, render_project, render_mapset)
         if not base:
             status += (
-                " No GRASS database was found; a display module needs the maps "
-                "in one."
+                " No GRASS database was found; this module works on maps in one."
             )
         elif not target:
             status += (
-                " Choose a project and mapset under Projects and mapsets; a "
-                "display module draws maps from one mapset."
+                " Choose a project and mapset under Projects and mapsets; this "
+                "module chooses its maps from one mapset."
             )
         elif not render_maps:
-            status += f" {render_project}/{render_mapset} has no maps to draw."
+            status += f" {render_project}/{render_mapset} has no maps to draw on."
     if not nodes and not (
         chosen_module
         and (chosen_module.get("mapset_runnable") or chosen_module.get("render_runnable"))
@@ -790,6 +804,10 @@ def panel_state(req, mode=None):
                             chosen_module, render_maps, render_mapset
                         )
                         if chosen_module and chosen_module.get("render_runnable")
+                        else raster.mapset_form(
+                            chosen_module, render_maps, render_mapset
+                        )
+                        if chosen_module and chosen_module.get("mapset_inputs")
                         else raster.form_of(chosen_module)
                     )
                 },
