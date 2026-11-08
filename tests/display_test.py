@@ -7,6 +7,8 @@ SPDX-License-Identifier: Unlicense
 """
 
 import json
+import os
+import subprocess
 
 import pytest
 
@@ -36,6 +38,37 @@ def raster(path, function, width=120, height=80):
     return str(path)
 
 
+def make_project(tmp_path):
+    """Make a GRASS database with one project and return ``(base, project)``."""
+    base = tmp_path / "db"
+    base.mkdir()
+    project = base / "P"
+    subprocess.run(
+        [
+            session.find_grass(),
+            "-c",
+            "EPSG:4326",
+            str(project),
+            "--exec",
+            "g.version",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return base, project
+
+
+def import_into(project, *args):
+    """Run one import in the project's PERMANENT mapset."""
+    subprocess.run(
+        [session.find_grass(), str(project) + os.sep, "--exec", *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
 def check_picture(path, width=120, height=80):
     """Open a rendered GeoTIFF and return it, checking it is an RGB picture."""
     dataset = gdal.Open(str(path))
@@ -47,13 +80,22 @@ def check_picture(path, width=120, height=80):
 
 
 def test_a_raster_display_module_renders_an_rgb_picture(tmp_path):
+    base, project = make_project(tmp_path)
     source = raster(
         tmp_path / "a.tif", lambda y, x: (x * 3 + y * 2) % 250
     )
+    import_into(project, "r.in.gdal", f"input={source}", "output=src1")
     target = tmp_path / "out.tif"
     with session.DisplayRun() as run:
-        messages = run.render(
-            "d.rast", ["map=src1"], [("raster", source, "src1")], str(target)
+        messages = run.render_mapset(
+            str(base),
+            "P",
+            "PERMANENT",
+            "d.rast",
+            ["map=src1@PERMANENT"],
+            ["src1@PERMANENT"],
+            [],
+            str(target),
         )
     dataset = check_picture(target)
     west, _, _, north = dataset.GetGeoTransform()[:4]
@@ -61,26 +103,30 @@ def test_a_raster_display_module_renders_an_rgb_picture(tmp_path):
     assert any("rendered" in message for message in messages)
 
 
-def test_his_and_rgb_render_several_layers(tmp_path):
+def test_his_and_rgb_render_several_maps_of_the_same_mapset(tmp_path):
+    base, project = make_project(tmp_path)
     red = raster(tmp_path / "r.tif", lambda y, x: (x * 2) % 250)
     green = raster(tmp_path / "g.tif", lambda y, x: (y * 3) % 250)
     blue = raster(tmp_path / "b.tif", lambda y, x: (x + y) % 250)
-    layers = [
-        ("raster", red, "src1"),
-        ("raster", green, "src2"),
-        ("raster", blue, "src3"),
-    ]
+    for name, path in (("src1", red), ("src2", green), ("src3", blue)):
+        import_into(project, "r.in.gdal", f"input={path}", f"output={name}")
+    maps = ["src1@PERMANENT", "src2@PERMANENT", "src3@PERMANENT"]
     for module, args in (
-        ("d.his", ["hue=src1", "intensity=src2", "saturation=src3"]),
-        ("d.rgb", ["red=src1", "green=src2", "blue=src3"]),
+        ("d.his", ["hue=src1@PERMANENT", "intensity=src2@PERMANENT",
+                   "saturation=src3@PERMANENT"]),
+        ("d.rgb", ["red=src1@PERMANENT", "green=src2@PERMANENT",
+                   "blue=src3@PERMANENT"]),
     ):
         target = tmp_path / f"{module.replace('.', '_')}.tif"
         with session.DisplayRun() as run:
-            run.render(module, args, layers, str(target))
+            run.render_mapset(
+                str(base), "P", "PERMANENT", module, args, maps, [], str(target)
+            )
         check_picture(target)
 
 
 def test_a_vector_display_module_renders_and_frames_the_vector(tmp_path):
+    base, project = make_project(tmp_path)
     vector = tmp_path / "vector.geojson"
     vector.write_text(
         json.dumps(
@@ -107,12 +153,17 @@ def test_a_vector_display_module_renders_and_frames_the_vector(tmp_path):
             }
         )
     )
+    import_into(project, "v.in.ogr", f"input={vector}", "output=src1")
     target = tmp_path / "vect.tif"
     with session.DisplayRun() as run:
-        run.render(
+        run.render_mapset(
+            str(base),
+            "P",
+            "PERMANENT",
             "d.vect",
-            ["map=src1", "display=shape", "color=red"],
-            [("vector", str(vector), "src1")],
+            ["map=src1@PERMANENT", "display=shape", "color=red"],
+            [],
+            ["src1@PERMANENT"],
             str(target),
         )
     dataset = check_picture(target, 1001, 1001)
