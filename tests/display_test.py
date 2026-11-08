@@ -7,7 +7,6 @@ SPDX-License-Identifier: Unlicense
 """
 
 import json
-import os
 import subprocess
 
 import pytest
@@ -62,7 +61,7 @@ def make_project(tmp_path):
 def import_into(project, *args):
     """Run one import in the project's PERMANENT mapset."""
     subprocess.run(
-        [session.find_grass(), str(project) + os.sep, "--exec", *args],
+        [session.find_grass(), str(project / "PERMANENT"), "--exec", *args],
         check=True,
         capture_output=True,
         text=True,
