@@ -928,6 +928,23 @@ def mapset_plan(entry, values, maps, mapset=None):
     return ports
 
 
+def _layer_args(entry, inputs, values, imported):
+    """Return the map arguments, then the module's own form arguments."""
+    values = _with_form(values)
+    names = {port["name"] for port in inputs or []}
+    form_values = {
+        name: value
+        for name, value in values.items()
+        if name not in names and name != PREVIEW_FIELD
+    }
+    args = []
+    for port in inputs or []:
+        maps = imported.get(port["name"]) or []
+        if maps:
+            args.append(f"{port['name']}={','.join(maps)}")
+    return args + form_args(entry, form_values)
+
+
 def render_args(entry, values, imported):
     """Return a display module's arguments for the imported layers.
 
@@ -936,19 +953,9 @@ def render_args(entry, values, imported):
     :param imported: ``{port name: [GRASS map name, ...]}``
     :return: a list of ``name=value`` and ``-flag`` arguments
     """
-    values = _with_form(values)
-    ports = {port["name"] for port in (entry.get("render_inputs") or [])}
-    form_values = {
-        name: value
-        for name, value in values.items()
-        if name not in ports and name != PREVIEW_FIELD
-    }
-    args = []
-    for port in entry.get("render_inputs") or []:
-        maps = imported.get(port["name"]) or []
-        if maps:
-            args.append(f"{port['name']}={','.join(maps)}")
-    args += form_args(entry, form_values)
+    args = _layer_args(
+        entry, (entry or {}).get("render_inputs"), values, imported
+    )
     # Without -d, d.title only prints the title it would draw.
     if entry.get("module") == "d.title" and "-d" not in args:
         args.append("-d")
@@ -959,6 +966,19 @@ def render_args(entry, values, imported):
         if "algorithm" not in named and "breaks" not in named:
             args.append("algorithm=int")
     return args
+
+
+def mapset_args(entry, values, imported):
+    """Return a mapset module's arguments for maps of the chosen mapset.
+
+    :param entry: a catalogue entry with ``mapset_inputs``
+    :param values: the panel's form values
+    :param imported: ``{port name: [GRASS map name, ...]}``
+    :return: a list of ``name=value`` and ``-flag`` arguments
+    """
+    return _layer_args(
+        entry, (entry or {}).get("mapset_inputs"), values, imported
+    )
 
 
 def output_dir():
