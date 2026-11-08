@@ -739,6 +739,50 @@ def test_the_panel_renders_a_display_module_from_the_chosen_mapset(
     assert answer["panel"]["items"]["form"]["fields"][0]["id"] == "map"
 
 
+def test_choosing_a_mapset_refreshes_a_display_modules_maps(monkeypatch, tmp_path):
+    import main
+
+    base = tmp_path / "db"
+    mapset = base / "P" / "PERMANENT"
+    (mapset / "cellhd").mkdir(parents=True)
+    (mapset / "WIND").write_text("")
+    (mapset / "cellhd" / "DEM").write_text("")
+    monkeypatch.setenv("GISDBASE", str(base))
+    display = {
+        "module": "d.rgb",
+        "family": "Display",
+        "summary": "Draws red, green and blue.",
+        "keywords": "",
+        "runnable": False,
+        "reason": "renders a picture",
+        "render_runnable": True,
+        "render_inputs": [
+            {"name": name, "kind": "raster", "label": name, "required": True,
+             "multiple": False}
+            for name in ("red", "green", "blue")
+        ],
+        "form": [],
+    }
+    monkeypatch.setattr(
+        main, "load_catalogue", lambda: {"catalogue": [display]}
+    )
+    answer = main.browse_database(
+        {
+            "panel": {
+                "values": {
+                    "modules": "d.rgb",
+                    "database": "mapset/P/PERMANENT",
+                }
+            }
+        }
+    )
+    fields = answer["panel"]["items"]["form"]["fields"]
+    by = {field["id"]: field for field in fields}
+    assert by["red"]["choices"] == ["DEM"]
+    assert by["green"]["choices"] == ["DEM"]
+    assert by["blue"]["choices"] == ["DEM"]
+
+
 def test_the_panel_runs_a_mapset_module_with_the_form(monkeypatch, tmp_path):
     import main
 

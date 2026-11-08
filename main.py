@@ -240,9 +240,25 @@ def database_panel(chosen=None, notes=()):
 
 
 def browse_database(req):
-    """Answer the tree again, with the chosen mapset's maps in it."""
-    chosen = ((req.get("panel") or {}).get("values") or {}).get("database")
-    return {"panel": {"items": database_panel(chosen), "values": {"database": chosen}}}
+    """Answer the tree again, with the chosen mapset's maps in it.
+
+    A display module's choices are the maps of the chosen mapset, so the form
+    is refreshed here too: choosing a mapset must show its maps without making
+    the user choose the module a second time.
+    """
+    values = (req.get("panel") or {}).get("values") or {}
+    chosen = values.get("database")
+    items = database_panel(chosen)
+    catalogue = load_catalogue().get("catalogue") or []
+    module = raster.entry_for(catalogue, values.get("modules"), quietly=True)
+    if module and module.get("render_runnable"):
+        base = database.gisdbase()
+        target = database.chosen_mapset(base, chosen) if base else None
+        maps = database.maps(base, *target) if target else []
+        items["form"] = {
+            "fields": raster.render_form(module, maps, target[1] if target else "")
+        }
+    return {"panel": {"items": items, "values": {"database": chosen}}}
 
 
 def add_folder(req):
