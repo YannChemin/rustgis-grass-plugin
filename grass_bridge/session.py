@@ -33,6 +33,10 @@ TIMEOUT = 1800
 #: killed with a half-written file behind it.
 COMMAND_LIMIT = 120
 
+#: The widest or tallest a rendered picture may be, so a fine region does not
+#: produce a huge grid for what is only a picture of colours.
+RENDER_MAX_PIXELS = 2048
+
 
 class GrassError(Exception):
     """A module, or GRASS itself, refused to do the work."""
