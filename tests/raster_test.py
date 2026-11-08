@@ -816,6 +816,108 @@ def test_a_render_plan_names_a_missing_required_layer():
     assert "map" in str(e.value).lower()
 
 
+def inplace_entry(module="r.colors", **fields):
+    """Return a raster module that changes a map of the chosen mapset."""
+    return entry(
+        module,
+        "Raster",
+        False,
+        reason="writes no raster",
+        mapset_runnable=True,
+        mapset_inputs=[
+            {
+                "name": "map",
+                "kind": "raster",
+                "label": "Name of raster map(s)",
+                "help": "",
+                "required": True,
+                "multiple": True,
+            }
+        ],
+        **fields,
+    )
+
+
+def test_a_mapset_form_offers_the_chosen_mapsets_maps():
+    module = inplace_entry(
+        form=[{"id": "color", "kind": "select", "choices": ["grey"]}]
+    )
+    fields = raster.mapset_form(
+        module, [("raster", "DEM"), ("raster", "NDVI")], "PERMANENT"
+    )
+    by = {field["id"]: field for field in fields}
+    assert by["map"]["kind"] == "multi"
+    assert by["map"]["choices"] == ["DEM", "NDVI"]
+    assert by["map"]["required"] is True
+    assert by["color"]["choices"] == ["grey"]
+
+
+def test_a_mapset_form_replaces_a_vector_maps_text_field():
+    module = entry(
+        "v.db.update",
+        "Vector",
+        False,
+        mapset_runnable=True,
+        mapset_inputs=[
+            {
+                "name": "map",
+                "kind": "vector",
+                "label": "Name of vector map",
+                "help": "",
+                "required": True,
+                "multiple": False,
+            }
+        ],
+        form=[{"id": "map", "kind": "text"}, {"id": "column", "kind": "text"}],
+    )
+    fields = raster.mapset_form(module, [("vector", "Roads")], "PERMANENT")
+    by = {field["id"]: field for field in fields}
+    assert by["map"]["kind"] == "select"
+    assert by["map"]["choices"] == ["Roads"]
+    assert [field["id"] for field in fields].count("map") == 1
+    assert "column" in by
+
+
+def test_a_mapset_plan_takes_the_map_by_name_from_that_mapset():
+    ports = raster.mapset_plan(
+        inplace_entry(),
+        {"map": ["DEM", "NDVI"]},
+        [("raster", "DEM"), ("raster", "NDVI")],
+        "PERMANENT",
+    )
+    assert ports == [
+        {
+            "name": "map",
+            "kind": "raster",
+            "multiple": True,
+            "maps": ["DEM", "NDVI"],
+        }
+    ]
+
+
+def test_a_mapset_plan_refuses_a_map_of_another_mapset():
+    with pytest.raises(session.GrassError) as e:
+        raster.mapset_plan(
+            inplace_entry(),
+            {"map": ["DEM@elsewhere"]},
+            [("raster", "DEM")],
+            "PERMANENT",
+        )
+    assert "not a raster map of the PERMANENT mapset" in str(e.value)
+
+
+def test_mapset_args_put_the_map_before_the_modules_own_parameters():
+    module = inplace_entry(
+        form=[{"id": "color", "kind": "select", "choices": ["grey", "elevation"]}]
+    )
+    args = raster.mapset_args(
+        module,
+        {"map": "DEM", "color": "elevation"},
+        {"map": ["DEM"]},
+    )
+    assert args == ["map=DEM", "color=elevation"]
+
+
 def test_render_args_keep_the_ports_out_of_the_module_form_values():
     entry = {
         "module": "d.his",

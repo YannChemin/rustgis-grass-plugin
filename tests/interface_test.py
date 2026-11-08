@@ -891,6 +891,73 @@ def test_the_panel_runs_a_mapset_module_with_the_form(monkeypatch, tmp_path):
     assert "ran in P/PERMANENT" in answer["messages"][0]
 
 
+def test_the_panel_runs_an_in_place_module_on_a_map_of_the_mapset(
+    monkeypatch, tmp_path
+):
+    import main
+
+    base = tmp_path / "db"
+    mapset = base / "P" / "PERMANENT"
+    (mapset / "cellhd").mkdir(parents=True)
+    (mapset / "WIND").write_text("")
+    (mapset / "cellhd" / "DEM").write_text("")
+    monkeypatch.setenv("GISDBASE", str(base))
+    seen = {}
+
+    class FakeRun:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def mapset_module(self, base, project, mapset, module, args):
+            seen.update(
+                base=base, project=project, mapset=mapset, module=module, args=args
+            )
+            return [f"{module} ran in {project}/{mapset}."]
+
+    monkeypatch.setattr(main.session, "Run", FakeRun)
+    monkeypatch.setattr(main, "progress", lambda text: None)
+    monkeypatch.setattr(main, "log", lambda text: None)
+    entry = {
+        "module": "r.colors",
+        "summary": "Changes a colour table.",
+        "family": "Raster",
+        "keywords": "",
+        "runnable": False,
+        "reason": "writes no raster",
+        "mapset_runnable": True,
+        "mapset_reason": "",
+        "mapset_inputs": [
+            {"name": "map", "kind": "raster", "label": "Map", "help": "",
+             "required": False, "multiple": True}
+        ],
+        "form": [
+            {"id": "color", "kind": "select", "choices": ["grey", "elevation"]}
+        ],
+    }
+    answer = main.run_module_in_mapset(
+        [entry],
+        entry,
+        {
+            "database": "mapset/P/PERMANENT",
+            "form": {"map": ["DEM"], "color": "elevation"},
+        },
+    )
+    assert seen == {
+        "base": str(base),
+        "project": "P",
+        "mapset": "PERMANENT",
+        "module": "r.colors",
+        "args": ["map=DEM", "color=elevation"],
+    }
+    assert answer["panel"]["items"]["form"]["fields"][0]["id"] == "map"
+
+
 def test_the_panel_refuses_a_module_it_cannot_drive(monkeypatch):
     import main
 
