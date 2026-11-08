@@ -712,23 +712,16 @@ def _with_form(values):
     return values
 
 
-def render_form(entry, maps, mapset=None):
-    """Return the form fields for a display module that renders a picture.
+def _map_fields(inputs, maps, mapset=None):
+    """Return one form field for each map a module reads.
 
-    The module's own parameters are kept, and one field is added for each map
-    input the module declares. The choices are the maps of one GRASS mapset,
-    because a display module reads maps from the project's database, not the
-    RustGIS project's layers.
-
-    :param entry: a catalogue entry with ``render_inputs``
+    :param inputs: ``render_inputs`` or ``mapset_inputs``
     :param maps: ``database.maps``, the chosen mapset's ``[(kind, name), ...]``
     :param mapset: the chosen mapset's name, for a missing-kind message
-    :return: the fields the panel shows
     """
-    inputs = list((entry or {}).get("render_inputs") or [])
     where = f"the {mapset} mapset" if mapset else "the chosen mapset"
     fields = []
-    for port in inputs:
+    for port in inputs or []:
         kind = port.get("kind")
         choices = _map_names(maps, kind)
         label = interface._short_label(port.get("label") or port.get("name") or "")
@@ -791,8 +784,34 @@ def render_form(entry, maps, mapset=None):
         else:
             field["default"] = "none"
         fields.append(field)
-    named = {port["name"] for port in inputs}
+    return fields
+
+
+def _with_module_form(entry, inputs, maps, mapset):
+    """Return the map fields followed by the module's own form fields."""
+    fields = _map_fields(inputs, maps, mapset)
+    named = {port["name"] for port in inputs or []}
     fields += [field for field in form_of(entry) if field["id"] not in named]
+    return fields[: interface.MAX_FORM_FIELDS]
+
+
+def render_form(entry, maps, mapset=None):
+    """Return the form fields for a display module that renders a picture.
+
+    The module's own parameters are kept, and one field is added for each map
+    input the module declares. The choices are the maps of one GRASS mapset,
+    because a display module reads maps from the project's database, not the
+    RustGIS project's layers.
+
+    :param entry: a catalogue entry with ``render_inputs``
+    :param maps: ``database.maps``, the chosen mapset's ``[(kind, name), ...]``
+    :param mapset: the chosen mapset's name, for a missing-kind message
+    :return: the fields the panel shows
+    """
+    fields = _with_module_form(
+        entry, (entry or {}).get("render_inputs"), maps, mapset
+    )
+    fields = fields[: interface.MAX_FORM_FIELDS - 1]
     fields.append(
         {
             "id": PREVIEW_FIELD,
@@ -805,33 +824,29 @@ def render_form(entry, maps, mapset=None):
             "default": False,
         }
     )
-    return fields[: interface.MAX_FORM_FIELDS]
+    return fields
 
 
-def render_plan(entry, values, maps, mapset=None):
-    """Resolve a display module's form into the maps it will draw.
+def mapset_form(entry, maps, mapset=None):
+    """Return a mapset module's form, with a field for each map it reads.
 
-    Every input must name a map of the same mapset: a display module reads
-    GRASS maps, and its choices come from the mapset selected under Projects
-    and mapsets.
-
-    :param entry: a catalogue entry with ``render_inputs``
-    :param values: the panel's form values
-    :param maps: ``database.maps``, the chosen mapset's ``[(kind, name), ...]``
-    :param mapset: the chosen mapset's name, for error messages
-    :return: ``(ports, preview)``, where each port is
-        ``{"name", "kind", "multiple", "maps"}`` and ``preview`` says
-        whether to keep the PNG
-    :raises session.GrassError: when a required input is missing or names no
-        map of the chosen mapset
+    A module such as ``r.colors`` changes a map of the chosen mapset rather
+    than writing a new one, so its map parameters are choices from that
+    mapset. The module's own parameters follow them.
     """
+    return _with_module_form(
+        entry, (entry or {}).get("mapset_inputs"), maps, mapset
+    )
+
+
+def _map_ports(entry, inputs, values, maps, mapset=None):
+    """Resolve a module's map fields into the maps of the chosen mapset."""
     values = _with_form(values)
-    inputs = (entry or {}).get("render_inputs") or []
     by_kind = {
         kind: set(_map_names(maps, kind)) for kind in ("raster", "vector")
     }
     ports, missing = [], []
-    for port in inputs:
+    for port in inputs or []:
         name, kind = port["name"], port.get("kind")
         raw = values.get(name)
         if port.get("multiple"):
@@ -863,13 +878,54 @@ def render_plan(entry, values, maps, mapset=None):
                     "maps": picked,
                 }
             )
+    return ports, missing
+
+
+def render_plan(entry, values, maps, mapset=None):
+    """Resolve a display module's form into the maps it will draw.
+
+    Every input must name a map of the same mapset: a display module reads
+    GRASS maps, and its choices come from the mapset selected under Projects
+    and mapsets.
+
+    :param entry: a catalogue entry with ``render_inputs``
+    :param values: the panel's form values
+    :param maps: ``database.maps``, the chosen mapset's ``[(kind, name), ...]``
+    :param mapset: the chosen mapset's name, for error messages
+    :return: ``(ports, preview)``, where each port is
+        ``{"name", "kind", "multiple", "maps"}`` and ``preview`` says
+        whether to keep the PNG
+    :raises session.GrassError: when a required input is missing or names no
+        map of the chosen mapset
+    """
+    ports, missing = _map_ports(
+        entry, (entry or {}).get("render_inputs"), values, maps, mapset
+    )
     if missing:
         raise session.GrassError(
             f"{entry['module']} needs {', '.join(missing)} before it can render"
         )
     if not ports:
         raise session.GrassError(f"{entry['module']} needs a map to draw")
-    return ports, bool(values.get(PREVIEW_FIELD))
+    return ports, bool(_with_form(values).get(PREVIEW_FIELD))
+
+
+def mapset_plan(entry, values, maps, mapset=None):
+    """Resolve a mapset module's map fields into that mapset's maps.
+
+    :return: ``[{"name", "kind", "multiple", "maps"}, ...]``, empty when the
+        module's map inputs are all optional and left empty
+    :raises session.GrassError: when a required map is missing or names no
+        map of the chosen mapset
+    """
+    ports, missing = _map_ports(
+        entry, (entry or {}).get("mapset_inputs"), values, maps, mapset
+    )
+    if missing:
+        raise session.GrassError(
+            f"{entry['module']} needs {', '.join(missing)} before it can run"
+        )
+    return ports
 
 
 def render_args(entry, values, imported):

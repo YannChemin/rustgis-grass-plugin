@@ -224,6 +224,49 @@ def _cannot_name(param):
     return None
 
 
+def _new_outputs(task):
+    """Return the parameters that name a new dataset, which a form cannot name."""
+    found = []
+    for param in task.findall("parameter"):
+        prompt = param.find("gisprompt")
+        if prompt is None or prompt.get("age") != "new":
+            continue
+        found.append(param.get("name") or "?")
+    return found
+
+
+def _mapset_inputs(task):
+    """Return the map layers a form can choose from the selected mapset.
+
+    :return: ``[{"name", "kind", "label", "help", "required", "multiple"}]``
+    """
+    inputs = []
+    for param in task.findall("parameter"):
+        prompt = param.find("gisprompt")
+        if prompt is None or prompt.get("age") == "new":
+            continue
+        element = _prompt(prompt)
+        if element in ("raster", "cell", "vector"):
+            kind = "vector" if element == "vector" else "raster"
+        else:
+            continue
+        inputs.append(
+            {
+                "name": param.get("name") or "",
+                "kind": kind,
+                "label": (
+                    _text(param.find("label"))
+                    or _text(param.find("description"))
+                    or (param.get("name") or "")
+                ),
+                "help": _text(param.find("description")),
+                "required": param.get("required") == "yes",
+                "multiple": param.get("multiple") == "yes",
+            }
+        )
+    return inputs
+
+
 def _mapset_runnability(task):
     """Return whether the form alone can run a module in a chosen mapset.
 
@@ -233,20 +276,45 @@ def _mapset_runnability(task):
     and mapsets says where the work goes. A required parameter the form cannot
     name (a raster, a space-time dataset, an output) still stops the module.
 
-    :return: ``{"mapset_runnable": bool, "mapset_reason": str}``
+    A raster or vector module that writes no new dataset is also offered here
+    when it works on maps of the selected mapset: r.colors changes a map's
+    colour table, r.support its metadata. Its map parameters become choices
+    from that mapset, like a display module's layers.
+
+    :return: ``{"mapset_runnable", "mapset_reason", "mapset_inputs"}``
     """
-    out = {"mapset_runnable": False, "mapset_reason": ""}
+    out = {
+        "mapset_runnable": False,
+        "mapset_reason": "",
+        "mapset_inputs": [],
+    }
     name = task.get("name") or ""
-    if family_of(name) not in MAPSET_FAMILIES:
-        out["mapset_reason"] = "works on a raster or vector layer"
-        return out
+    family = family_of(name)
+    inputs = _mapset_inputs(task)
+    if family not in MAPSET_FAMILIES:
+        if family not in ("Raster", "Vector"):
+            out["mapset_reason"] = "works on a raster or vector layer"
+            return out
+        if _new_outputs(task):
+            out["mapset_reason"] = "writes a new map, which the form cannot name"
+            return out
+        if not inputs:
+            out["mapset_reason"] = "works on a raster or vector layer"
+            return out
     offered = _offerable(task)
+    fillable = {port["name"] for port in inputs}
     missing = []
     for param in task.findall("parameter"):
         if param.get("required") != "yes":
             continue
         pname = param.get("name") or ""
         if pname in offered or _text(param.find("default")):
+            continue
+        element = _layer_element(param)
+        if pname in fillable and element in ("raster", "cell", "vector"):
+            continue
+        if element in ("raster_3d", "grid3"):
+            missing.append("a 3D raster, which the form cannot name")
             continue
         missing.append(_cannot_name(param) or (f"'{pname}'" if pname else "a parameter"))
     for flag in task.findall("flag"):
@@ -261,6 +329,7 @@ def _mapset_runnability(task):
             out["mapset_reason"] += "..."
         return out
     out["mapset_runnable"] = True
+    out["mapset_inputs"] = inputs
     return out
 
 
