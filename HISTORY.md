@@ -352,7 +352,8 @@ its modules can draw to a file instead of a monitor.
 - Tests: `tests/display_test.py` runs three real GRASS renders (raster,
   `d.his`+`d.rgb`, vector framing) when GRASS and GDAL are present;
   `tests/interface_test.py` and `tests/raster_test.py` cover the triage, form,
-  plan and arguments. `make check` is 128 passing and `ruff check` is clean.
+  plan and arguments. Choosing a mapset refreshes the display form's
+  choices at once. `make check` is 129 passing and `ruff check` is clean.
 
 ### Verification
 
