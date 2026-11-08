@@ -73,7 +73,8 @@ on the file and add the result back.
   run**. Any readable module shows its parameters in the form. The 88 that read one
   raster and write one run on the chosen layer; 91 temporal, database and general
   modules run with the form in the GRASS project/mapset chosen under **Projects and
-  mapsets** (so `t.in.era5` imports its space-time dataset there); 19 display (`d.*`)
+  mapsets** (so `t.in.era5` imports its space-time dataset there); 25 change a map of
+  that same mapset in place (`r.colors`, `v.db.update`); 19 display (`d.*`)
   modules render a picture of maps from that same chosen mapset, imported back
   as an RGB layer, with an optional PNG preview; and the rest carry the reason they cannot run. The panel's **Catalogue** tree keeps
   all modules, only the imagery ones, or only the temporal ones; `imagery-state` and

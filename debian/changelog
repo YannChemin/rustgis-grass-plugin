@@ -6,8 +6,11 @@ rustgis-grass-plugin (0.10.0) unstable; urgency=medium
     and the form offers to keep the PNG preview as well. Modules that need a
     live display, edit a map in place, or cannot run in this GRASS build keep
     their reason.
-  * The catalogue now marks 88 raster, 91 mapset and 19 display modules as
-    runnable (198 in all) out of 1,177 readable modules. The tree, module
+  * The catalogue now marks 88 raster, 116 mapset and 19 display modules as
+    runnable (223 in all) out of 1,177 readable modules. The mapset runnable
+    count includes 25 modules that change a map of the chosen mapset in place,
+    such as r.colors and v.db.update: their map parameters are choices drawn
+    from that mapset. The tree, module
     labels and details say when a module writes a map and when it draws a
     picture.
   * The manifest's version is 0.10.0; its 24 panel items, 38 commands, 64

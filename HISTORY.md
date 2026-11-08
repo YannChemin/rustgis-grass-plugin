@@ -317,7 +317,7 @@ pretended in the panel.
 - `.gitignore`, `debian/changelog`, `man/rustgis-grass-setup.1`,
   `dist/rustgis-grass-plugin_0.7.0_all.deb`.
 
-## This session — display modules render a picture (0.10.0)
+## This session — display and in-place modules (0.10.0)
 
 ### Objective
 
@@ -353,12 +353,21 @@ its modules can draw to a file instead of a monitor.
   `d.his`+`d.rgb`, vector framing) when GRASS and GDAL are present;
   `tests/interface_test.py` and `tests/raster_test.py` cover the triage, form,
   plan and arguments. Choosing a mapset refreshes the display form's
-  choices at once. `make check` is 129 passing and `ruff check` is clean.
+  choices at once. `make check` is 137 passing and `ruff check` is clean.
+- In-place Raster and Vector modules (`r.colors`, `r.null`, `v.db.update`) also
+  run on maps of the chosen mapset. `interface.INPLACE_MODULES` lists the 25
+  modules whose map parameters are inputs, not outputs, because addons such as
+  `r.agent.aco` mislabel a new output with `age="old"`; a rule cannot tell them
+  apart. `_mapset_inputs()` exposes those parameters, `raster.mapset_form()`,
+  `mapset_plan()` and `mapset_args()` build the choices, resolve the names and
+  write the arguments, and `main.run_module_in_mapset()` uses them. Their map
+  fields become choices from the chosen mapset, and choosing a mapset refreshes
+  them at once.
 
 ### Verification
 
 - Regenerated manifest: 64 tools, 38 commands, 7 ribbon groups, 24 panel
-  items, 1,177 catalogue entries (88 raster, 91 mapset, 19 display runnable),
+  items, 1,177 catalogue entries (88 raster, 116 mapset, 19 display runnable),
   version 0.10.0.
 - Real renders from a chosen mapset produce a georeferenced, three-band RGB
   GeoTIFF; a vector-only render frames the layer at 1001×1001 instead of one

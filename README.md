@@ -44,9 +44,9 @@ They are reached three ways, because the ABI gives three and each has a ceiling:
 |---|---|---|
 | **Tools**, with a generated form in the Tools pane | 64 vector modules | a manifest holds **64 tools**, and a tool takes no raster, so only vector modules qualify: 128 do, half of them fit |
 | **Commands** on the ribbon | Slope, Aspect, Viewshed, **18 common raster modules** and **7 imagery modules** in menus by theme, the region and the database | a manifest holds up to **256 commands**, and a command opens no dialog, so each needs the panel to be told anything |
-| **Run Module**, from the panel's tree | **all 1,177** are reached and show their parameters; the **88** that read one raster and write one, **91** temporal, database and general modules whose form is all they need, and **19** display modules that render a picture, can be run | a command has no form of its own, so the panel's **Module parameters** form sends the values it holds; the rest still need a raster, vector or dataset the form cannot name |
+| **Run Module**, from the panel's tree | **all 1,177** are reached and show their parameters; the **88** that read one raster and write one, **91** temporal, database and general modules whose form is all they need, **25** that change a map of the chosen mapset in place (`r.colors`, `v.db.update`), and **19** display modules that render a picture, can be run | a command has no form of its own, so the panel's **Module parameters** form sends the values it holds; the rest still need a raster, vector or dataset the form cannot name |
 
-The tree is searchable and has three branches: **Runs from here** (the 198), **All modules**
+The tree is searchable and has three branches: **Runs from here** (the 223), **All modules**
 (every module, with its reason for not running here) and **Recently run**. A **Catalogue**
 tree above it keeps all modules, only the imagery (`i.*`) ones, or only the temporal (`t.*`)
 ones; the **Imagery Modules** and **Temporal Modules** ribbon buttons turn those filters on.
@@ -77,7 +77,7 @@ keeps the values of fields with the same name and starts the new ones at their d
 So "every GRASS module" is true for *reaching* them and for *showing their parameters*: 1,177
 forms are generated from the installation. It is false for *running* them from the panel: the
 88 raster ones run on the chosen layer, 91 temporal, database and general ones run with their
-form in a chosen mapset, 19 display ones render to a layer, and the rest still need inputs or
+form in a chosen mapset, 25 change a map of that mapset in place, 19 display ones render to a layer, and the rest still need inputs or
 outputs a command cannot supply.
 The 64-tool form budget is the ABI's; the panel's form has no such budget.
 
