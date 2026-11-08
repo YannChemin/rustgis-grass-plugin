@@ -73,8 +73,9 @@ on the file and add the result back.
   run**. Any readable module shows its parameters in the form. The 88 that read one
   raster and write one run on the chosen layer; 91 temporal, database and general
   modules run with the form in the GRASS project/mapset chosen under **Projects and
-  mapsets** (so `t.in.era5` imports its space-time dataset there), and the rest carry
-  the reason they cannot run. The panel's **Catalogue** tree keeps
+  mapsets** (so `t.in.era5` imports its space-time dataset there); 19 display (`d.*`)
+  modules render a picture, imported back as an RGB layer, with an optional PNG
+  preview; and the rest carry the reason they cannot run. The panel's **Catalogue** tree keeps
   all modules, only the imagery ones, or only the temporal ones; `imagery-state` and
   `temporal-state` turn those filters on and `all-state` turns them off. A temporal
   module whose required parameter names a space-time dataset or a raster cannot be
@@ -82,7 +83,8 @@ on the file and add the result back.
   A leading triangle **▸** marks a module Run Module can
   drive; the others carry their reason, such as *needs several bands*, *needs an
   imagery group* or *needs a display*, so tell the user what the module needs instead
-  of offering a run that would fail.
+  of offering a run that would fail. A display module that does run writes a layer
+  holding a picture, not a data map; say so rather than treating it as analysis.
 - Choosing a module fills the panel's **Module parameters** form with that module's
   own parameters, read from its GRASS interface description. Text boxes, numbers,
   checkboxes for flags, selection lists for choices and multi-selection lists for

@@ -20,4 +20,4 @@ debian/*.substvars
 # release, point the exception at the new file and "git rm --cached" the old
 # one; a tracked file needs "git add -f" while dist/* is ignored.
 dist/*
-!dist/rustgis-grass-plugin_0.9.0_all.deb
+!dist/rustgis-grass-plugin_0.10.0_all.deb

@@ -317,6 +317,57 @@ pretended in the panel.
 - `.gitignore`, `debian/changelog`, `man/rustgis-grass-setup.1`,
   `dist/rustgis-grass-plugin_0.7.0_all.deb`.
 
+## This session — display modules render a picture (0.10.0)
+
+### Objective
+
+Make the display (`d.*`) branch of the catalogue usable from the panel. It was
+the one family refused wholesale with "needs a display", even though most of
+its modules can draw to a file instead of a monitor.
+
+### What changed
+
+- `interface._render_runnability()` triages display modules: it exposes their
+  input layers and marks a module `render_runnable` when a headless render can
+  produce a picture. 19 modules qualify; interactive ones (`d.what.*`,
+  `d.rast.edit`) and `d.polar` (its script uses a function missing from this
+  GRASS build) keep an explicit reason.
+- `session.DisplayRun.render()` renders with GRASS's direct cairo driver
+  (`GRASS_RENDER_IMMEDIATE=cairo`), writes a world file, imports the PNG with
+  `r.in.gdal -o`, resets the region to the picture grid and exports an RGB
+  GeoTIFF to the plugin cache. It no longer starts a monitor: `d.mon start`
+  does not survive between two `grass --exec` processes.
+- `raster.render_form()`, `render_plan()` and `render_args()` add the display
+  module's form, layer choices, the "Keep the PNG preview" checkbox, and the
+  small argument fixes `d.title` (`-d`) and `d.vect.thematic` (`algorithm=int`)
+  need. `main.run_display_module()` exports each input layer, renders, adds the
+  RGB layer to the map and reports it.
+- The catalogue carries `render_runnable`, `render_reason` and
+  `render_inputs`; the tree marks render modules with **▸** and
+  `[renders a picture]`, and the details text says the result is a picture, not
+  a dataset.
+- Tests: `tests/display_test.py` runs three real GRASS renders (raster,
+  `d.his`+`d.rgb`, vector framing) when GRASS and GDAL are present;
+  `tests/interface_test.py` and `tests/raster_test.py` cover the triage, form,
+  plan and arguments. `make check` is 126 passing and `ruff check` is clean.
+
+### Verification
+
+- Regenerated manifest: 64 tools, 38 commands, 7 ribbon groups, 24 panel
+  items, 1,177 catalogue entries (88 raster, 91 mapset, 19 display runnable),
+  version 0.10.0.
+- Real renders produce a georeferenced, three-band RGB GeoTIFF; a vector-only
+  render frames the layer at 1001×1001 instead of one pixel.
+- `d.mon start=cairo` was confirmed not to persist; the direct-render
+  environment was confirmed to work across separate processes.
+
+### Files changed
+
+- `grass_bridge/interface.py`, `grass_bridge/session.py`,
+  `grass_bridge/raster.py`, `main.py`, `generate_manifest.py`.
+- `tests/interface_test.py`, `tests/raster_test.py`, `tests/display_test.py`.
+- `README.md`, `HISTORY.md`, `debian/changelog`, `man/rustgis-grass-setup.1`.
+
 ## This session — form-driven mapset runs (0.9.0)
 
 ### Objective

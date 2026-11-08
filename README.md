@@ -26,8 +26,8 @@ Apache-2.0 GIS this way.
 
 ## What it offers
 
-Everything the installation has. On this machine that is **1,181 modules**, addons included, of
-which **1,176** could describe themselves:
+Everything the installation has. On this machine that is **1,182 modules**, addons included, of
+which **1,177** could describe themselves:
 
 | Family | Modules | Family | Modules |
 |---|---|---|---|
@@ -44,9 +44,9 @@ They are reached three ways, because the ABI gives three and each has a ceiling:
 |---|---|---|
 | **Tools**, with a generated form in the Tools pane | 64 vector modules | a manifest holds **64 tools**, and a tool takes no raster, so only vector modules qualify: 128 do, half of them fit |
 | **Commands** on the ribbon | Slope, Aspect, Viewshed, **18 common raster modules** and **7 imagery modules** in menus by theme, the region and the database | a manifest holds up to **256 commands**, and a command opens no dialog, so each needs the panel to be told anything |
-| **Run Module**, from the panel's tree | **all 1,176** are reached and show their parameters; the **88** that read one raster and write one, plus **91** temporal, database and general modules whose form is all they need, can be run | a command has no form of its own, so the panel's **Module parameters** form sends the values it holds; the rest still need a raster, vector or dataset the form cannot name |
+| **Run Module**, from the panel's tree | **all 1,177** are reached and show their parameters; the **88** that read one raster and write one, **91** temporal, database and general modules whose form is all they need, and **19** display modules that render a picture, can be run | a command has no form of its own, so the panel's **Module parameters** form sends the values it holds; the rest still need a raster, vector or dataset the form cannot name |
 
-The tree is searchable and has three branches: **Runs from here** (the 179), **All modules**
+The tree is searchable and has three branches: **Runs from here** (the 198), **All modules**
 (every module, with its reason for not running here) and **Recently run**. A **Catalogue**
 tree above it keeps all modules, only the imagery (`i.*`) ones, or only the temporal (`t.*`)
 ones; the **Imagery Modules** and **Temporal Modules** ribbon buttons turn those filters on.
@@ -54,7 +54,10 @@ A temporal, database or general module does not read one raster and write anothe
 imports a dataset or changes the project it runs in. Those run from the form, writing into
 the project and mapset chosen under **Projects and mapsets** (so `t.in.era5` can download a
 variable straight into a mapset); one whose required parameter names a space-time dataset
-or a raster the form cannot set keeps its reason. A module Run Module can drive is marked
+or a raster the form cannot set keeps its reason. A display module (`d.*`) does not write a
+map either: it draws a picture, and the 19 that can draw without a monitor return it as an
+RGB raster layer, optionally kept as a PNG preview as well. The rest need a live display, ask
+for a map to edit, or cannot run in this GRASS build, and keep their reason. A module Run Module can drive is marked
 with **▸**; the others carry their reason, such as *needs several bands* or *needs an
 imagery group*, and choosing one says what it reads and writes in the **Chosen module**
 text before Run Module is pressed. The 64 modules that could have been tools but did not fit are listed in
@@ -69,10 +72,11 @@ number field cannot hold it. Fields start at the module's defaults; clearing a t
 selection leaves the parameter out, so GRASS uses its own default. Changing the chosen module
 keeps the values of fields with the same name and starts the new ones at their defaults.
 
-So "every GRASS module" is true for *reaching* them and for *showing their parameters*: 1,176
+So "every GRASS module" is true for *reaching* them and for *showing their parameters*: 1,177
 forms are generated from the installation. It is false for *running* them from the panel: the
 88 raster ones run on the chosen layer, 91 temporal, database and general ones run with their
-form in a chosen mapset, and the rest still need inputs or outputs a command cannot supply.
+form in a chosen mapset, 19 display ones render to a layer, and the rest still need inputs or
+outputs a command cannot supply.
 The 64-tool form budget is the ABI's; the panel's form has no such budget.
 
 ### Its own tab
@@ -119,7 +123,7 @@ parameters per tool.
 From the package, on Debian or Ubuntu:
 
 ```sh
-sudo apt install ./dist/rustgis-grass-plugin_0.9.0_all.deb
+sudo apt install ./dist/rustgis-grass-plugin_0.10.0_all.deb
 rustgis-grass-setup          # once per user; again after upgrading GRASS
 ```
 
@@ -292,7 +296,7 @@ what RustGIS would not take rather than offering something that cannot work: a r
 a name with a digit in it (`v.gsflow.segments` has `width1`), a name the module declares twice
 (the same module declares four of them twice over), and a file the module writes although it
 declares it as one it reads (`v.rectify`'s `rmsfile`), since a file picker cannot name a file
-that does not exist yet. Reading all 1,181 forms takes about three and
+that does not exist yet. Reading all 1,182 forms takes about three and
 a half minutes, 24 at a time.
 
 ## Watch out

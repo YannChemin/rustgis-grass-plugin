@@ -635,6 +635,101 @@ def test_a_required_output_name_is_not_something_the_form_can_fill():
     assert "output name" in entry["mapset_reason"]
 
 
+def test_the_panel_renders_a_display_module_from_its_layer_fields(
+    monkeypatch, tmp_path
+):
+    import main
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    layers = [
+        {"id": 1, "name": "DEM", "raster": True, "active": True},
+        {
+            "id": 2,
+            "name": "Roads",
+            "raster": False,
+            "geometry": "Polygon",
+            "active": False,
+        },
+    ]
+    monkeypatch.setattr(
+        main,
+        "call",
+        lambda op, params=None: (
+            layers
+            if op == "host.layers"
+            else {"id": 9, "name": params.get("name")}
+            if op == "layer.addData"
+            else {}
+        ),
+    )
+    monkeypatch.setattr(main, "progress", lambda text: None)
+    monkeypatch.setattr(main, "log", lambda text: None)
+
+    exported = tmp_path / "roads.geojson"
+
+    def export_vector(name, tag=""):
+        exported.write_text("{}")
+        return str(exported), []
+
+    monkeypatch.setattr(main, "export_vector", export_vector)
+    seen = {}
+
+    class FakeDisplayRun:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def render(self, module, args, layers, target, preview=None):
+            seen.update(
+                module=module, args=args, layers=layers, target=target, preview=preview
+            )
+            pathlib.Path(target).write_text("tif")
+            return [f"{module} rendered a picture."]
+
+    monkeypatch.setattr(main.session, "DisplayRun", FakeDisplayRun)
+    entry = {
+        "module": "d.vect",
+        "family": "Display",
+        "summary": "Draws a vector.",
+        "keywords": "",
+        "runnable": False,
+        "reason": "renders a picture",
+        "render_runnable": True,
+        "render_inputs": [
+            {
+                "name": "map",
+                "kind": "vector",
+                "label": "Map",
+                "help": "",
+                "required": True,
+                "multiple": False,
+            }
+        ],
+        "form": [{"id": "color", "kind": "text"}],
+    }
+    answer = main.run_display_module(
+        [entry],
+        entry,
+        {
+            "raster": "1",
+            "form": {"map": "Roads", "color": "red"},
+            "mode": "mode/all",
+        },
+    )
+    assert seen["module"] == "d.vect"
+    assert seen["args"] == ["map=src1", "color=red"]
+    assert seen["layers"] == [("vector", str(exported), "src1")]
+    assert seen["target"].endswith(".tif")
+    assert not exported.exists()
+    assert answer["layer"]["id"] == 9
+    assert answer["panel"]["items"]["form"]["fields"][0]["id"] == "map"
+
+
 def test_the_panel_runs_a_mapset_module_with_the_form(monkeypatch, tmp_path):
     import main
 

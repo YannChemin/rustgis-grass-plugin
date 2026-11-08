@@ -356,14 +356,9 @@ def run_display_module(catalogue, entry, values):
     RustGIS as an ordinary raster layer of colours.
     """
     layers = call("host.layers") or []
+    form = values.get("form") if isinstance(values.get("form"), dict) else {}
     ports, preview = raster.render_plan(entry, values, layers)
-    named = {port["name"] for port in ports}
-    form_values = {
-        name: value
-        for name, value in (values or {}).items()
-        if name not in named and name != raster.PREVIEW_FIELD
-    }
-    missing = raster.missing_form_values(entry, form_values)
+    missing = raster.missing_form_values(entry, form)
     if missing:
         raise session.GrassError(
             f"{entry['module']} needs {', '.join(missing)} before it can render"
@@ -393,7 +388,7 @@ def run_display_module(catalogue, entry, values):
         with session.DisplayRun(progress=progress) as run:
             messages = run.render(
                 entry["module"],
-                raster.render_args(entry, values, imported),
+                raster.render_args(entry, form, imported),
                 sources,
                 target,
                 preview=preview_path,
@@ -727,9 +722,20 @@ def panel_state(req, mode=None):
         if family:
             status += f" Showing {family.lower()} modules only."
     chosen_module = raster.entry_for(catalogue, values.get("modules"), quietly=True)
+    render_needs_raster = bool(
+        chosen_module
+        and chosen_module.get("render_runnable")
+        and any(
+            port.get("kind") == "raster"
+            for port in chosen_module.get("render_inputs") or []
+        )
+    )
     if not nodes and not (
         chosen_module
-        and (chosen_module.get("mapset_runnable") or chosen_module.get("render_runnable"))
+        and (
+            chosen_module.get("mapset_runnable")
+            or (chosen_module.get("render_runnable") and not render_needs_raster)
+        )
     ):
         status += " The map has no raster layer."
     module_nodes, _ = raster.catalogue_tree(

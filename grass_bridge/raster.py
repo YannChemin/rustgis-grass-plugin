@@ -707,6 +707,20 @@ def _layer_choices(layers, kind):
     return out
 
 
+def _with_form(values):
+    """Return the panel values with a nested ``form`` mapping merged in.
+
+    The host keeps every form field under ``form``, while the raster tree's
+    choice and the band slider are beside it. Either shape is accepted, so a
+    caller can pass the panel's values as they arrived.
+    """
+    values = values or {}
+    form = values.get("form")
+    if isinstance(form, dict):
+        return {**values, **form}
+    return values
+
+
 def _find_layer(layers, text, kind):
     """Return the project layer whose name or id is ``text``, or None."""
     for layer in layers or []:
@@ -738,16 +752,20 @@ def render_form(entry, layers, chosen=None):
     for port in inputs:
         kind = port.get("kind")
         # The panel's chosen raster fills the first single raster input; there
-        # is no second question to ask about it.
-        if kind == "raster" and port is first_raster and not port.get("multiple"):
+        # is no second question to ask about it. Without a chosen raster the
+        # field is shown, so a picture can still be made from several rasters.
+        if (
+            kind == "raster"
+            and port is first_raster
+            and not port.get("multiple")
+            and chosen
+        ):
             continue
         choices = _layer_choices(layers, kind)
-        if not choices:
-            # No layer of this kind: show the field anyway only when it is
-            # optional, so the reason a required one is missing comes from
-            # render_plan rather than an empty list of choices.
-            if port.get("required"):
-                continue
+        # A required input with no layer of its kind is left out: the reason
+        # it cannot run comes from render_plan, not from an empty choice list.
+        if not choices and port.get("required"):
+            continue
         label = interface._short_label(port.get("label") or port.get("name") or "")
         if port.get("multiple"):
             field = {
@@ -809,7 +827,7 @@ def render_plan(entry, values, layers):
     :raises session.GrassError: when a required input is missing or names no
         layer of the project
     """
-    values = values or {}
+    values = _with_form(values)
     inputs = (entry or {}).get("render_inputs") or []
     raster_ports = [port for port in inputs if port.get("kind") == "raster"]
     first_raster = raster_ports[0] if raster_ports else None
@@ -871,10 +889,11 @@ def render_args(entry, values, imported):
     :param imported: ``{port name: [GRASS map name, ...]}``
     :return: a list of ``name=value`` and ``-flag`` arguments
     """
+    values = _with_form(values)
     ports = {port["name"] for port in (entry.get("render_inputs") or [])}
     form_values = {
         name: value
-        for name, value in (values or {}).items()
+        for name, value in values.items()
         if name not in ports and name != PREVIEW_FIELD
     }
     args = []
@@ -886,6 +905,12 @@ def render_args(entry, values, imported):
     # Without -d, d.title only prints the title it would draw.
     if entry.get("module") == "d.title" and "-d" not in args:
         args.append("-d")
+    # d.vect.thematic takes either an algorithm or explicit class breaks;
+    # neither is required on its own, so name the default when neither is set.
+    if entry.get("module") == "d.vect.thematic":
+        named = {arg.split("=", 1)[0] for arg in args if "=" in arg}
+        if "algorithm" not in named and "breaks" not in named:
+            args.append("algorithm=int")
     return args
 
 

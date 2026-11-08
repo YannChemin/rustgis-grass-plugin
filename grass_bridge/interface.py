@@ -39,6 +39,13 @@ RENDER_OPTIONAL_INPUT = frozenset({"d.legend"})
 #: give them even while a cairo monitor is running.
 RENDER_INTERACTIVE = frozenset({"d.what.rast", "d.what.vect", "d.rast.edit"})
 
+#: Display modules whose own script cannot draw in this GRASS build. d.polar
+#: calls a grass.script function GRASS 8.6 no longer has, so it fails before
+#: it draws anything; offering it would only promise a picture it cannot make.
+RENDER_UNUSABLE = {
+    "d.polar": "its drawing script cannot run in this GRASS build",
+}
+
 #: A plugin manifest allows this many parameters per tool.
 MAX_PARAMS = 32
 
@@ -284,6 +291,9 @@ def _render_runnability(task):
         return out
     if name in RENDER_INTERACTIVE:
         out["render_reason"] = "waits for a click on the display"
+        return out
+    if name in RENDER_UNUSABLE:
+        out["render_reason"] = RENDER_UNUSABLE[name]
         return out
 
     inputs, outputs, files = [], [], []

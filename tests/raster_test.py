@@ -713,3 +713,156 @@ def test_a_cache_that_cannot_be_written_never_fails_a_run(monkeypatch):
     monkeypatch.setattr(raster, "output_dir", refuse)
     assert raster.read_recents() == []
     assert raster.remember("r.slope.aspect") == ["r.slope.aspect"]
+
+
+def vector_layer(id, name):
+    """Return one vector entry as ``host.layers`` answers it."""
+    return {
+        "id": id,
+        "name": name,
+        "raster": False,
+        "geometry": "Polygon",
+        "active": False,
+    }
+
+
+def display_entry(module="d.vect", **fields):
+    """Return a display module entry with one vector input."""
+    return entry(
+        module,
+        "Display",
+        False,
+        reason="renders a picture",
+        render_runnable=True,
+        render_inputs=[
+            {
+                "name": "map",
+                "kind": "vector",
+                "label": "Name of vector map",
+                "help": "",
+                "required": True,
+                "multiple": False,
+            }
+        ],
+        **fields,
+    )
+
+
+def test_a_render_form_asks_for_each_layer_the_chosen_raster_cannot_fill():
+    layers = [layer(1, "DEM"), vector_layer(2, "Roads")]
+    fields = raster.render_form(display_entry(), layers, chosen="1")
+    by = {f["id"]: f for f in fields}
+    assert by["map"]["kind"] == "select"
+    assert by["map"]["choices"] == ["Roads"]
+    assert by["map"]["required"] is True
+    assert by[raster.PREVIEW_FIELD]["kind"] == "checkbox"
+    assert by[raster.PREVIEW_FIELD]["default"] is False
+
+
+def test_a_render_form_does_not_ask_twice_for_the_vector_map():
+    layers = [vector_layer(2, "Roads")]
+    fields = raster.render_form(
+        display_entry(form=[{"id": "map", "kind": "text"}]), layers
+    )
+    assert [f["id"] for f in fields].count("map") == 1
+
+
+def test_a_render_plan_takes_the_chosen_raster_by_id_and_layers_by_name():
+    layers = [layer(1, "DEM"), vector_layer(2, "Roads")]
+    ports, preview = raster.render_plan(
+        {
+            "module": "d.vect",
+            "render_inputs": [
+                {
+                    "name": "map",
+                    "kind": "vector",
+                    "label": "Map",
+                    "help": "",
+                    "required": True,
+                    "multiple": False,
+                }
+            ],
+        },
+        {"raster": "1", "map": "Roads", raster.PREVIEW_FIELD: True},
+        layers,
+    )
+    assert ports[0]["layers"][0]["name"] == "Roads"
+    assert preview is True
+
+
+def test_a_render_plan_names_a_missing_required_layer():
+    with pytest.raises(session.GrassError) as e:
+        raster.render_plan(display_entry(), {}, [layer(1, "DEM")])
+    assert "map" in str(e.value).lower()
+
+
+def test_render_args_keep_the_ports_out_of_the_module_form_values():
+    entry = {
+        "module": "d.his",
+        "render_inputs": [
+            {"name": "hue", "kind": "raster", "label": "Hue"},
+            {"name": "intensity", "kind": "raster", "label": "Intensity"},
+        ],
+        "form": [{"id": "brighten", "kind": "select", "choices": ["1", "3"]}],
+    }
+    args = raster.render_args(
+        entry,
+        {
+            "hue": "h",
+            "intensity": "i",
+            "brighten": "3",
+            raster.PREVIEW_FIELD: True,
+        },
+        {"hue": ["src1"], "intensity": ["src2"]},
+    )
+    assert args == ["hue=src1", "intensity=src2", "brighten=3"]
+
+
+def test_a_display_module_gets_the_flag_its_picture_needs():
+    title = {"module": "d.title", "render_inputs": [], "form": []}
+    assert raster.render_args(title, {}, {}) == ["-d"]
+    thematic = {
+        "module": "d.vect.thematic",
+        "render_inputs": [],
+        "form": [{"id": "breaks", "kind": "text"}],
+    }
+    assert raster.render_args(thematic, {}, {}) == ["algorithm=int"]
+    assert (
+        raster.render_args(thematic, {"breaks": "10,20"}, {})
+        == ["breaks=10,20"]
+    )
+
+
+def test_a_render_module_is_in_runs_from_here_and_says_it_renders():
+    catalogue = [display_entry()]
+    nodes, notes = raster.catalogue_tree(catalogue, "d.vect")
+    runs = next(node for node in nodes if node["id"] == "branch/runs")
+    assert runs["count"] == 1
+    assert "renders a picture" in nodes[0]["children"][0]["children"][0]["label"]
+    assert "renders a picture" in notes[0]
+    assert "Renders a picture" in raster.module_details(display_entry())
+
+
+def test_a_render_form_shows_the_first_raster_only_when_none_is_chosen():
+    display = entry(
+        "d.rast",
+        "Display",
+        False,
+        render_runnable=True,
+        render_inputs=[
+            {
+                "name": "map",
+                "kind": "raster",
+                "label": "Name of raster map",
+                "help": "",
+                "required": True,
+                "multiple": False,
+            }
+        ],
+    )
+    layers = [layer(1, "DEM")]
+    chosen = raster.render_form(display, layers, chosen="1")
+    assert "map" not in [field["id"] for field in chosen]
+    unchosen = raster.render_form(display, layers)
+    by = {field["id"]: field for field in unchosen}
+    assert by["map"]["choices"] == ["DEM"] and by["map"]["required"] is True
