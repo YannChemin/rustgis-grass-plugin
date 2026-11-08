@@ -31,6 +31,40 @@ TEMPORAL_ELEMENTS = frozenset({"stds", "strds", "stvds", "str3ds", "stdsp"})
 #: than on one raster in and one raster out.
 MAPSET_FAMILIES = frozenset({"Temporal", "Database", "General", "Miscellaneous"})
 
+#: Raster and vector modules that change an existing map of the chosen mapset
+#: instead of writing a new one. Their map parameters become choices from that
+#: mapset. This is a list, not a rule, because an addon can label a new output
+#: with ``age="old"``: r.agent.aco's outputmap and r.recode.attr's output both
+#: write a map even though their own XML says otherwise.
+INPLACE_MODULES = frozenset(
+    {
+        "r.category",
+        "r.colors",
+        "r.colors.qml",
+        "r.colors.stddev",
+        "r.compress",
+        "r.mask",
+        "r.null",
+        "r.quant",
+        "r.region",
+        "r.semantic.label",
+        "r.support",
+        "r.support.stats",
+        "r.timestamp",
+        "v.colors",
+        "v.colors2",
+        "v.db.addcolumn",
+        "v.db.addtable",
+        "v.db.connect",
+        "v.db.dropcolumn",
+        "v.db.droptable",
+        "v.db.join",
+        "v.db.renamecolumn",
+        "v.db.update",
+        "v.edit",
+    }
+)
+
 #: Display modules whose raster input is optional in GRASS but which still
 #: draw it: d.legend needs a raster (or a 3D raster) to have anything to show.
 RENDER_OPTIONAL_INPUT = frozenset({"d.legend"})
@@ -292,11 +326,8 @@ def _mapset_runnability(task):
     family = family_of(name)
     inputs = _mapset_inputs(task)
     if family not in MAPSET_FAMILIES:
-        if family not in ("Raster", "Vector"):
+        if name not in INPLACE_MODULES:
             out["mapset_reason"] = "works on a raster or vector layer"
-            return out
-        if _new_outputs(task):
-            out["mapset_reason"] = "writes a new map, which the form cannot name"
             return out
         if not inputs:
             out["mapset_reason"] = "works on a raster or vector layer"
