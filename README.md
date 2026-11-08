@@ -55,8 +55,10 @@ imports a dataset or changes the project it runs in. Those run from the form, wr
 the project and mapset chosen under **Projects and mapsets** (so `t.in.era5` can download a
 variable straight into a mapset); one whose required parameter names a space-time dataset
 or a raster the form cannot set keeps its reason. A display module (`d.*`) does not write a
-map either: it draws a picture, and the 19 that can draw without a monitor return it as an
-RGB raster layer, optionally kept as a PNG preview as well. The rest need a live display, ask
+map either: it draws a picture of maps from the GRASS mapset chosen under **Projects and
+mapsets**, and the 19 that can draw without a monitor return it as an RGB raster layer,
+optionally kept as a PNG preview as well. Every input of one render comes from that same
+mapset, and the fields stay visible when it holds no map of a kind. The rest need a live display, ask
 for a map to edit, or cannot run in this GRASS build, and keep their reason. A module Run Module can drive is marked
 with **▸**; the others carry their reason, such as *needs several bands* or *needs an
 imagery group*, and choosing one says what it reads and writes in the **Chosen module**

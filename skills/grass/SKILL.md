@@ -74,8 +74,8 @@ on the file and add the result back.
   raster and write one run on the chosen layer; 91 temporal, database and general
   modules run with the form in the GRASS project/mapset chosen under **Projects and
   mapsets** (so `t.in.era5` imports its space-time dataset there); 19 display (`d.*`)
-  modules render a picture, imported back as an RGB layer, with an optional PNG
-  preview; and the rest carry the reason they cannot run. The panel's **Catalogue** tree keeps
+  modules render a picture of maps from that same chosen mapset, imported back
+  as an RGB layer, with an optional PNG preview; and the rest carry the reason they cannot run. The panel's **Catalogue** tree keeps
   all modules, only the imagery ones, or only the temporal ones; `imagery-state` and
   `temporal-state` turn those filters on and `all-state` turns them off. A temporal
   module whose required parameter names a space-time dataset or a raster cannot be

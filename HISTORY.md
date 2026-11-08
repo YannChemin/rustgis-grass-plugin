@@ -332,16 +332,19 @@ its modules can draw to a file instead of a monitor.
   produce a picture. 19 modules qualify; interactive ones (`d.what.*`,
   `d.rast.edit`) and `d.polar` (its script uses a function missing from this
   GRASS build) keep an explicit reason.
-- `session.DisplayRun.render()` renders with GRASS's direct cairo driver
+- `session.DisplayRun.render_mapset()` renders maps of one mapset chosen under
+  **Projects and mapsets**, in a throwaway mapset of the same project. It adds
+  that mapset to the search path, renders with GRASS's direct cairo driver
   (`GRASS_RENDER_IMMEDIATE=cairo`), writes a world file, imports the PNG with
   `r.in.gdal -o`, resets the region to the picture grid and exports an RGB
   GeoTIFF to the plugin cache. It no longer starts a monitor: `d.mon start`
   does not survive between two `grass --exec` processes.
 - `raster.render_form()`, `render_plan()` and `render_args()` add the display
-  module's form, layer choices, the "Keep the PNG preview" checkbox, and the
-  small argument fixes `d.title` (`-d`) and `d.vect.thematic` (`algorithm=int`)
-  need. `main.run_display_module()` exports each input layer, renders, adds the
-  RGB layer to the map and reports it.
+  module's form, choices drawn from that one mapset's raster and vector maps,
+  the "Keep the PNG preview" checkbox, and the small argument fixes `d.title`
+  (`-d`) and `d.vect.thematic` (`algorithm=int`) need. Every input must name a
+  map of the same mapset. `main.run_display_module()` renders, adds the RGB
+  layer to the map and reports it; it no longer exports RustGIS layers first.
 - The catalogue carries `render_runnable`, `render_reason` and
   `render_inputs`; the tree marks render modules with **▸** and
   `[renders a picture]`, and the details text says the result is a picture, not
@@ -349,15 +352,19 @@ its modules can draw to a file instead of a monitor.
 - Tests: `tests/display_test.py` runs three real GRASS renders (raster,
   `d.his`+`d.rgb`, vector framing) when GRASS and GDAL are present;
   `tests/interface_test.py` and `tests/raster_test.py` cover the triage, form,
-  plan and arguments. `make check` is 126 passing and `ruff check` is clean.
+  plan and arguments. `make check` is 128 passing and `ruff check` is clean.
 
 ### Verification
 
 - Regenerated manifest: 64 tools, 38 commands, 7 ribbon groups, 24 panel
   items, 1,177 catalogue entries (88 raster, 91 mapset, 19 display runnable),
   version 0.10.0.
-- Real renders produce a georeferenced, three-band RGB GeoTIFF; a vector-only
-  render frames the layer at 1001×1001 instead of one pixel.
+- Real renders from a chosen mapset produce a georeferenced, three-band RGB
+  GeoTIFF; a vector-only render frames the layer at 1001×1001 instead of one
+  pixel.
+- With no mapset chosen, `d.rgb` keeps its red/green/blue fields visible and
+  the panel says to choose a project and mapset, instead of hiding them and
+  leaving only the flags.
 - `d.mon start=cairo` was confirmed not to persist; the direct-render
   environment was confirmed to work across separate processes.
 
