@@ -77,8 +77,8 @@ keeps the values of fields with the same name and starts the new ones at their d
 So "every GRASS module" is true for *reaching* them and for *showing their parameters*: 1,177
 forms are generated from the installation. It is false for *running* them from the panel: the
 88 raster ones run on the chosen layer, 91 temporal, database and general ones run with their
-form in a chosen mapset, 25 change a map of that mapset in place, 19 display ones render to a layer, and the rest still need inputs or
-outputs a command cannot supply.
+form in a chosen mapset, 25 change a map of that mapset in place, 19 display ones
+render to a layer, and the rest still need inputs or outputs a command cannot supply.
 The 64-tool form budget is the ABI's; the panel's form has no such budget.
 
 ### Its own tab
