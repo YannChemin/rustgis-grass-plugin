@@ -902,6 +902,8 @@ def test_the_panel_runs_an_in_place_module_on_a_map_of_the_mapset(
     (mapset / "WIND").write_text("")
     (mapset / "cellhd" / "DEM").write_text("")
     monkeypatch.setenv("GISDBASE", str(base))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setattr(main, "call", lambda op, params=None: {})
     seen = {}
 
     class FakeRun:
