@@ -258,17 +258,6 @@ def _cannot_name(param):
     return None
 
 
-def _new_outputs(task):
-    """Return the parameters that name a new dataset, which a form cannot name."""
-    found = []
-    for param in task.findall("parameter"):
-        prompt = param.find("gisprompt")
-        if prompt is None or prompt.get("age") != "new":
-            continue
-        found.append(param.get("name") or "?")
-    return found
-
-
 def _mapset_inputs(task):
     """Return the map layers a form can choose from the selected mapset.
 
