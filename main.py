@@ -297,9 +297,9 @@ def browse_database(req):
     chosen = values.get("database")
     items = database_panel(chosen)
     catalogue = load_catalogue().get("catalogue") or []
+    base = database.gisdbase()
     module = raster.entry_for(catalogue, values.get("modules"), quietly=True)
     if module and (module.get("render_runnable") or module.get("mapset_inputs")):
-        base = database.gisdbase()
         target = database.chosen_mapset(base, chosen) if base else None
         maps = mapset_contents(base, *target, module) if target else []
         mapset = target[1] if target else ""
@@ -316,15 +316,34 @@ def browse_database(req):
     parts = str(chosen or "").split(database.SEP)
     named = len(parts) == 4 and parts[0] in ("raster", "vector", "group")
     workspace = parts[0] == "workspace" and len(parts) == 2
+    workspace_ready = False
     if workspace:
-        opening = database.read_workspace(database.parse_workspace_node(chosen))
-        said = (
-            f"{opening['project']}/{opening['mapset']}, "
-            f"{len(opening['layers'])} layer(s): press Load Workspace, which "
-            "replaces this project."
+        opening_path = database.parse_workspace_node(chosen)
+        opening = database.read_workspace(opening_path)
+        # Whether it can open at all is settled here, not after the press: the
+        # project a .gxw names is often not where the file says any more.
+        place = (
+            database.workspace_place(opening_path, opening, base)
             if opening
-            else "That workspace cannot be read."
+            else ("", "")
         )
+        if not opening:
+            said = "That workspace cannot be read."
+        elif not place[0]:
+            said = (
+                f"{opening['project']}/{opening['mapset']} is on none of the "
+                "databases this workspace could be on, so it cannot be "
+                "loaded: the project was not kept with it."
+            )
+        else:
+            said = (
+                f"{place[1]}/{opening['mapset']}, "
+                f"{len(opening['layers'])} layer(s): press Load Workspace, "
+                "which replaces this project."
+            )
+            if place[0] != (opening["database"] or ""):
+                said += f" Read from {place[0]}, not the path it records."
+        workspace_ready = bool(opening and place[0] and opening["layers"])
     elif named and parts[0] == "group":
         said = f"{parts[3]}@{parts[2]}: press Add Map for a composite of its bands."
     elif named:
@@ -335,7 +354,8 @@ def browse_database(req):
         said = "Choose a project and a mapset."
     items["status"] = {"text": said}
     items["data-add"] = {"enabled": named}
-    items["data-workspace"] = {"enabled": workspace}
+    # Load Workspace is only worth pressing for a workspace that can open.
+    items["data-workspace"] = {"enabled": workspace and workspace_ready}
     # Its whole answer is the database tree, which only this step draws, so a
     # Browse Mapset pressed from the ribbon has to bring the panel here.
     return {"panel": panel_answer(items, {"database": chosen}, "data")}
@@ -388,14 +408,31 @@ def load_workspace(req):
     if not workspace:
         raise session.GrassError(f"{path} is not a readable GRASS workspace")
 
-    # The workspace names the database it was written for; it is the one to
-    # read its maps from, not whichever database this machine defaults to.
-    base = workspace["database"] or database.gisdbase()
-    if not base or not os.path.isdir(os.path.join(base, workspace["project"])):
+    # The workspace names the database it was written for, which is right
+    # while the project is still there, and often it is not: a .gxw outlives
+    # the machine it was made on. database.workspace_place also looks in the
+    # folder the file itself is in, since a backup carries the project and the
+    # workspace together while the recorded path goes stale.
+    base, project = database.workspace_place(path, workspace, database.gisdbase())
+    if not base:
+        tried = [workspace["database"] or "no database recorded"]
+        tried.append(os.path.dirname(os.path.dirname(os.path.abspath(path))))
+        here = database.gisdbase()
+        if here:
+            tried.append(here)
         raise session.GrassError(
-            f"{path} names GRASS project <{workspace['project']}> in "
-            f"{workspace['database'] or 'no database'}, which is not there"
+            f"{path} opens GRASS project <{workspace['project']}>, mapset "
+            f"<{workspace['mapset']}>, which is on none of the databases it "
+            f"could be on: {', '.join(dict.fromkeys(tried))}. The workspace "
+            "outlived its project, or the project was not copied with it."
         )
+    if project != workspace["project"]:
+        log(
+            f"{os.path.basename(path)} records project "
+            f"<{workspace['project']}>, and is being read from <{project}> in "
+            f"{base}, the project folder it is kept in."
+        )
+    workspace = {**workspace, "project": project}
     if not workspace["layers"]:
         raise session.GrassError(
             f"{path} has no raster or vector layer to load: its map display "

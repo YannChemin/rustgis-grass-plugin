@@ -554,6 +554,26 @@ Still open:
   A `mapset` parameter beside `module`, and form values in the command's own
   params, would make it one call.
 
+### DONE — A workspace found in a backup opens from where it actually is
+
+Reported from the app on 2026-11-16:
+`/home/yann/SSD256Gb/20221128_MBP_backup/grassdata/Normandie/Nounours.gxw names GRASS project
+<Normandie> in /home/yann/grassdata, which is not there`.
+
+The message was accurate and the behaviour was wrong. The file is from 2021 and records
+`/home/yann/grassdata`, which exists today and has no `Normandie` in it: the project went to a
+backup drive and the `.gxw` went with it, one folder away from where it was looked for. Since a
+`.gxw` lives in `<database>/<project>/`, the file's own location is better evidence than the path
+it records. `database.workspace_place` now tries the recorded database, then the folder the file
+is in (taking that folder's name as the project, so a renamed copy works), then this machine's
+database, accepting a place only when the mapset's `WIND` is there.
+
+Measured over the user's own 26 workspaces: 7 failed, **4 now open** (Normandie among them --
+19 layers, EPSG:2154, framed on its own extent), and the remaining 3 are `.gxw` files kept in
+folders of scripts whose project was never copied along. Those are still listed, with
+`- project not found` in the label and Load Workspace **disabled**, and pressing it anyway names
+every database tried rather than only the first.
+
 ### PARTLY DONE — Refresh the screenshot
 
 The standard reference image is **`plugin_grassgis.png`**, the one `README.md`

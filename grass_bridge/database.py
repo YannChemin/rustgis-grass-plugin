@@ -457,7 +457,9 @@ def tree(base, open_mapset=None, home=None):
                 "children": [
                     {
                         "id": workspace_node(path),
-                        "label": _workspace_label(path, workspace),
+                        "label": _workspace_label(
+                            path, workspace, workspace_place(path, workspace, base)
+                        ),
                     }
                     for path, workspace in found[:MAX_NODES]
                 ],
@@ -526,18 +528,73 @@ def tree(base, open_mapset=None, home=None):
     return nodes, notes
 
 
-def _workspace_label(path, workspace):
+def workspace_place(path, workspace, current=None):
+    """Return the ``(database, project)`` a workspace's maps are in now.
+
+    A ``.gxw`` records the database it was written for, which is the right
+    answer while the project is still there. It often is not: these files
+    outlive the machine they were made on, and a backup carries the project
+    to another drive while the file still names the old path. One from 2021
+    naming ``/home/yann/grassdata`` and the project ``Normandie`` is a real
+    case -- that database exists today, but its ``Normandie`` is long gone,
+    and the project sits beside the ``.gxw`` itself in a backup folder.
+
+    So three places are tried, in order of how much they are worth trusting:
+
+    1. the database the file records, if it holds the project and mapset;
+    2. the folder the file is in, if that folder **is** the project (a
+       ``.gxw`` lives in ``<database>/<project>/``). The folder's own name is
+       taken as the project, not the recorded one, so a renamed copy works;
+    3. this machine's database, for a file kept away from its project.
+
+    A place counts only when the mapset's ``WIND`` is there, since that is
+    what makes a folder a mapset rather than a folder of the same name.
+
+    :param current: this machine's database, or None to skip that step
+    :return: ``(database, project)``, or ``("", "")`` when nowhere has it
+    """
+    mapset = workspace["mapset"]
+    recorded = workspace["database"]
+    project = workspace["project"]
+    if recorded and _is_mapset(recorded, project, mapset):
+        return recorded, project
+    folder = os.path.dirname(os.path.abspath(path))
+    beside, named = os.path.dirname(folder), os.path.basename(folder)
+    if named and _is_mapset(beside, named, mapset):
+        return beside, named
+    if current and _is_mapset(current, project, mapset):
+        return current, project
+    return "", ""
+
+
+def _is_mapset(base, project, mapset):
+    """Return whether ``<base>/<project>/<mapset>`` is a GRASS mapset."""
+    if not base or not project or not mapset:
+        return False
+    return os.path.isfile(os.path.join(base, project, mapset, "WIND"))
+
+
+def _workspace_label(path, workspace, place=None):
     """Return the tree label for one workspace.
 
     It says the project and mapset it opens and how many layers it holds,
     because the file name is almost always ``default.gxw`` and would tell the
     user nothing.
+
+    A workspace whose project is nowhere on this machine says so in the
+    label. It is still listed: a file that was found and cannot be opened is
+    worth seeing with its reason, the way the module tree lists a module it
+    cannot run. Hiding it would leave the user wondering whether the scan
+    missed it.
+
+    :param place: ``workspace_place``'s answer, or None to not say
     """
     where = f"{workspace['project']}/{workspace['mapset']}"
     layers = len(workspace["layers"])
     folder = os.path.basename(os.path.dirname(path)) or path
     counted = "1 layer" if layers == 1 else f"{layers} layers"
-    return f"{where} ({counted}) - {folder}/{os.path.basename(path)}"
+    lost = " - project not found" if place is not None and not place[0] else ""
+    return f"{where} ({counted}) - {folder}/{os.path.basename(path)}{lost}"
 
 
 def opened(node):

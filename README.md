@@ -343,6 +343,28 @@ all: GRASS writes a project's workspace beside it, so one listing of the project
 Hidden folders, `node_modules`, `venv`, `target` and the like are skipped, and the walk stops four
 levels down.
 
+**A `.gxw` outlives the machine it was written on, so the recorded path is a hint, not an
+address.** One of these files from 2021 records `<database>/home/yann/grassdata</database>` and
+the project `Normandie`. That database still exists; its `Normandie` does not — the project went
+to a backup drive, and the workspace file travelled with it. So three places are tried, in order
+of how much each is worth trusting:
+
+1. the database the file records, while it still holds the project and mapset;
+2. **the folder the file is in**, when that folder *is* the project — a `.gxw` lives in
+   `<database>/<project>/`, so the file's own place says where its project is now. The folder's
+   name is taken as the project, not the recorded one, so a copy renamed on the way to the backup
+   still opens;
+3. this machine's database, for a file kept away from its project.
+
+A place counts only when the mapset's `WIND` is there, since that is what makes a folder a mapset
+rather than a folder of the same name. Of 26 workspaces found on this machine, 7 could not be
+opened from their recorded path and **4 of those open from the folder they are kept in**. The
+other 3 are `.gxw` files in folders of scripts whose project was never copied along: they are
+still **listed, with `- project not found` in the label** and **Load Workspace disabled**, the
+way the module tree lists a module it cannot run. A file that was found and cannot be opened is
+worth seeing with its reason; leaving it out would only raise the question of whether the scan
+missed it.
+
 **Load Workspace** then opens one:
 
 | | |

@@ -81,6 +81,17 @@ rustgis-grass-plugin (0.11.0) unstable; urgency=medium
     more; one that must name a map it writes still is, and now says so --
     t.rast.to.rast3 reported a missing 3D raster when what it needs is a name
     for the one it writes.
+  * A workspace is read from where its project actually is. A .gxw records the
+    database it was written for, and these files outlive the machine they were
+    made on: one from 2021 naming /home/yann/grassdata and the project
+    Normandie failed, because that database exists and its Normandie does not
+    -- the project had gone to a backup drive with the workspace file beside
+    it. The folder a .gxw is kept in is now tried too, and its name taken as
+    the project so a renamed copy opens, then this machine's database; a place
+    counts only where the mapset's WIND is. Of 26 workspaces found here, 7
+    could not open from their recorded path and 4 now do. One whose project is
+    nowhere is still listed, labelled "project not found" with Load Workspace
+    disabled, and pressing it names every database tried.
   * The panel no longer tells a module it takes no raster when Run Module runs
     it: a temporal or display module was shown the raster path's reason for a
     path it was never on.

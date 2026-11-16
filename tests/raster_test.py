@@ -1287,3 +1287,92 @@ def test_a_mapset_s_3d_rasters_are_listed_beside_its_maps(tmp_path):
     found = database.maps(str(tmp_path), "proj", "PERMANENT")
     assert ("raster_3d", "cube") in found
     assert ("raster", "dem") in found and ("vector", "roads") in found
+
+
+def mapset_at(folder, mapset="PERMANENT"):
+    """Make <folder>/<mapset> a GRASS mapset, as its WIND file does."""
+    (folder / mapset).mkdir(parents=True, exist_ok=True)
+    (folder / mapset / "WIND").write_text("proj: 1\n")
+    return folder
+
+
+def test_a_workspace_is_read_from_the_database_it_records(tmp_path):
+    # The recorded database is right while the project is still there, and is
+    # preferred over every guess.
+    base = tmp_path / "grassdata"
+    mapset_at(base / "IGN")
+    path = workspace_file(base / "IGN")
+    found = database.read_workspace(path)
+    assert database.workspace_place(path, found, None) == (str(base), "IGN")
+
+
+def test_a_workspace_whose_recorded_project_is_gone_is_read_beside_itself(tmp_path):
+    # The real case: a 2021 .gxw records /home/yann/grassdata and the project
+    # Normandie. That database still exists, and its Normandie does not -- the
+    # project went to a backup drive together with the workspace file.
+    recorded = tmp_path / "grassdata"
+    recorded.mkdir()
+    backup = tmp_path / "backup" / "grassdata"
+    mapset_at(backup / "IGN")
+    path = backup / "IGN" / "default.gxw"
+    path.write_text(GXW.format(base=str(recorded)))
+    found = database.read_workspace(str(path))
+    assert found["database"] == str(recorded)
+    assert database.workspace_place(str(path), found, None) == (str(backup), "IGN")
+
+
+def test_a_renamed_backup_folder_is_believed_over_the_recorded_name(tmp_path):
+    # The folder a .gxw is kept in is the project, whatever the file records,
+    # so a copy renamed on the way to the backup still opens.
+    backup = tmp_path / "backup"
+    mapset_at(backup / "IGN_2021")
+    path = backup / "IGN_2021" / "default.gxw"
+    path.write_text(GXW.format(base="/gone"))
+    found = database.read_workspace(str(path))
+    assert database.workspace_place(str(path), found, None) == (
+        str(backup),
+        "IGN_2021",
+    )
+
+
+def test_a_workspace_kept_away_from_its_project_falls_back_to_this_machine(tmp_path):
+    here = tmp_path / "grassdata"
+    mapset_at(here / "IGN")
+    elsewhere = tmp_path / "Documents"
+    path = workspace_file(elsewhere)  # records <elsewhere> as its database
+    found = database.read_workspace(path)
+    assert database.workspace_place(path, found, str(here)) == (str(here), "IGN")
+
+
+def test_a_workspace_whose_project_is_nowhere_resolves_to_nothing(tmp_path):
+    # Three of the user's 26 .gxw files are like this: kept in a folder of
+    # scripts, with the project never copied along.
+    scripts = tmp_path / "Backup" / "NorthKorea"
+    path = workspace_file(scripts)
+    found = database.read_workspace(path)
+    assert database.workspace_place(path, found, str(tmp_path / "grassdata")) == (
+        "",
+        "",
+    )
+
+
+def test_a_folder_of_the_right_name_without_a_mapset_is_not_a_project(tmp_path):
+    # The mapset's WIND is what makes it a project; a folder of the same name
+    # is not enough, or a backup of scripts named after the project would be
+    # loaded as one.
+    base = tmp_path / "grassdata"
+    (base / "IGN").mkdir(parents=True)
+    path = workspace_file(base / "IGN")
+    found = database.read_workspace(path)
+    assert database.workspace_place(path, found, None) == ("", "")
+
+
+def test_a_workspace_that_cannot_open_says_so_in_its_tree_label(tmp_path):
+    path = workspace_file(tmp_path / "IGN")
+    found = database.read_workspace(path)
+    lost = database._workspace_label(path, found, ("", ""))
+    fine = database._workspace_label(path, found, (str(tmp_path), "IGN"))
+    assert lost.endswith("project not found")
+    assert "project not found" not in fine
+    # Said nothing about it when the caller does not know.
+    assert "project not found" not in database._workspace_label(path, found, None)
