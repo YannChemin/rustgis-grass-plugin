@@ -833,11 +833,16 @@ def run_module_in_mapset(catalogue, entry, values):
             "no GRASS database was found: GISDBASE is not set, GRASS's settings "
             "file names none, and there is no ~/grassdata"
         )
-    target = database.chosen_mapset(base, values.get("database"))
+    chosen = values.get("database")
+    target = database.chosen_mapset(base, chosen)
     if not target:
+        named = (chosen or "").split(database.SEP)[1:]
         raise session.GrassError(
-            f"{entry['module']} runs in a GRASS mapset: choose the project and "
-            "mapset it should write to under Projects and mapsets."
+            f"{entry['module']} runs in a GRASS mapset, and "
+            f"{database.SEP.join(named)} is not one of {base}"
+            if named
+            else f"{entry['module']} runs in a GRASS mapset: choose the "
+            "project and mapset it should write to under Projects and mapsets."
         )
     project, mapset = target
     maps = mapset_contents(base, project, mapset, entry)
@@ -874,6 +879,44 @@ def run_module_in_mapset(catalogue, entry, values):
     }
 
 
+def with_params(values, params):
+    """Return the panel's values with a command's own parameters laid over.
+
+    A script cannot choose in a tree or type in a form: RustGIS keeps a
+    tree's value only while that value was among the nodes last sent, and a
+    form takes values only for the fields it currently holds. So reaching a
+    module from the command line meant walking the panel there first -- four
+    calls before the run. These parameters say the same things directly:
+
+    ``{"module": "t.rast.series", "mapset": "Busoga/PERMANENT",
+    "values": {"input": "s2_B04@PERMANENT", "output": "b04_mean"}}``
+
+    They are laid **over** the panel, so a parameter wins where both say
+    something, and they go through the very same checks: the mapset must hold
+    the maps and datasets named, and an output name is still refused if it is
+    taken. Nothing here is a way around a check.
+    """
+    params = params or {}
+    out = dict(values or {})
+    named = database.mapset_node(params.get("mapset"))
+    if named:
+        out["database"] = named
+    elif params.get("mapset"):
+        raise session.GrassError(
+            f"mapset: {params['mapset']!r} is not a project and mapset; "
+            'name them as "<project>/<mapset>"'
+        )
+    given = params.get("values")
+    if given is not None:
+        if not isinstance(given, dict):
+            raise session.GrassError(
+                "values: the module's parameters go in an object, "
+                '{"input": "...", "output": "..."}'
+            )
+        out["form"] = {**(out.get("form") or {}), **given}
+    return out
+
+
 def run_module(req, module=None):
     """Run the module chosen in the tree, on a raster or in a mapset.
 
@@ -894,7 +937,7 @@ def run_module(req, module=None):
         the one named in the request's parameters, or the one chosen in the
         tree
     """
-    values = panel_values(req)
+    values = with_params(panel_values(req), req.get("params"))
     catalogue = load_catalogue().get("catalogue") or []
     asked = (req.get("params") or {}).get("module")
     entry = raster.entry_for(catalogue, module or asked or values.get("modules"))

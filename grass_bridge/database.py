@@ -607,6 +607,27 @@ def opened(node):
     return None
 
 
+def mapset_node(given):
+    """Return the tree node id for a ``"<project>/<mapset>"`` a caller named.
+
+    A script cannot choose in a tree: RustGIS keeps a tree's value only while
+    that value was among the nodes last sent, so a caller naming a mapset in
+    a command's parameters needs it turned into the node the panel would have
+    sent. A node id given in full is passed through.
+
+    :return: ``"mapset/<project>/<mapset>"``, or "" when it is neither
+    """
+    text = str(given or "").strip().strip(SEP)
+    if not text:
+        return ""
+    parts = text.split(SEP)
+    if len(parts) == 3 and parts[0] == "mapset":
+        return text
+    if len(parts) == 2:
+        return f"mapset{SEP}{text}"
+    return ""
+
+
 def chosen_mapset(base, node):
     """Return the ``(project, mapset)`` a chosen node names, if it is a mapset.
 

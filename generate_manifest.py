@@ -356,8 +356,10 @@ COMMANDS = [
         "raster runs with the form's values in the GRASS mapset chosen under "
         "Projects and mapsets.",
         "icon": "run",
-        "params": '{"module"?: "r.slope.aspect", "timeout"?: seconds} (without '
-        "them the panel's trees choose the module, the layer and the mapset)",
+        "params": '{"module"?: "t.rast.series", "mapset"?: "<project>/<mapset>", '
+        '"values"?: {"input": "...", "output": "..."}, "timeout"?: seconds} '
+        "(without them the panel's tree, form and mapset choice say the same; "
+        "the same checks apply either way)",
         # A download (t.in.era5) does not fit in the 120 seconds a command
         # normally gets.
         "timeout": LONG_TIMEOUT,
