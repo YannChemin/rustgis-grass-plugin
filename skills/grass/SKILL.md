@@ -10,16 +10,15 @@ as a process plugin. Nothing of GRASS ships with it, so every answer depends on 
 is installed: the panel's **Last run** text says the version it found, and
 `modules.json` beside the plugin lists the modules this manifest was built from.
 
-## The panel is four steps, in the order the work is done
+## The panel is three tabs, in the order the work is done
 
-The **GRASS GIS** panel shows one step at a time, chosen by the **Step** dropdown at
-its top, because GRASS needs them in this order:
+The **GRASS GIS** panel shows one step at a time, chosen by the **tab row** across its
+top, because GRASS needs them in this order:
 
-| Step | What it holds |
+| Tab | What it holds |
 |---|---|
 | `data` | the GRASS database tree, **Add Map**, **GRASS Database** |
 | `layer` | the raster layer, its band, the computational region and the cell size |
-| `terrain` | the slope, aspect and viewshed runs and their own parameters |
 | `modules` | the **Catalogue** filter, the module tree, **Chosen module**, the form, **Run Module** |
 
 The chosen layer, the region and **Last run** stay visible in the steps that act on
@@ -91,18 +90,12 @@ on the file and add the result back.
   `r-watershed`, `r-neighbors`, `r-sunmask`, `r-fillnulls`, and the rest of the GRASS
   tab's Raster menus. The Imagery group adds the imagery ones the panel can drive
   (`i-edge`, `i-zc`, `i-destripe`, `i-sar-speckle`, `i-water`, `i-emissivity`,
-  `i-rotate`) under Enhance, Preprocess, Detect and Geometry. Three shaped commands
-  take parameters from the panel instead of GRASS's defaults: `raster-slope` (degrees
-  or percent), `raster-aspect` and `raster-viewshed` (height, range, earth curvature,
-  and the viewpoint).
-- **The viewshed looks from the place picked on the map**, the panel's **Viewpoint on
-  the Map** pick, in the terrain step. Without one it falls back to the centre of the
-  map, as it always did, and the run's messages say which was used and where it ended
-  up in the raster's own projection. A script gives the degrees and RustGIS works out
-  the rest:
+  `i-rotate`) under Enhance, Preprocess, Detect and Geometry. A command runs its
+  module with GRASS's own defaults; to set a parameter, choose the module in the
+  panel and fill its **Module parameters** form, or pass `values` to `run-module`.
+- **Region from a Box** is a pick on the map:
 
 ```
-plugin:grass-vector/raster-viewshed={"panel": {"viewpoint": {"lon": -1.55, "lat": 47.21}, "height": 30, "maxdist": 3}}
 plugin:grass-vector/region-box={"panel": {"region-box": {"bbox": [-2.0, 47.0, -1.0, 48.0]}}}
 ```
 
