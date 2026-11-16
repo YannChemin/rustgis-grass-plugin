@@ -58,52 +58,6 @@ def test_only_raster_layers_reach_the_panel_tree():
     assert nodes == [{"id": "7", "label": "DEM"}]
 
 
-def test_slope_is_in_degrees_unless_the_panel_says_percent():
-    argv, notes = raster.module_args("raster-slope", {})
-    assert "format=degrees" in argv and "degrees" in notes[0]
-    argv, notes = raster.module_args("raster-slope", {"percent": True})
-    assert "format=percent" in argv and "percent" in notes[0]
-
-
-def test_aspect_says_what_its_numbers_mean():
-    argv, notes = raster.module_args("raster-aspect", {})
-    assert argv[:2] == ["elevation=src", "aspect=out"]
-    assert "-n" in argv
-    assert "clockwise from north" in notes[0] and "-9999" in notes[0]
-
-
-def test_a_viewshed_needs_somewhere_to_look_from():
-    with pytest.raises(session.GrassError):
-        raster.module_args("raster-viewshed", {})
-
-
-def test_a_viewshed_range_is_given_in_metres_and_said_in_kilometres():
-    argv, notes = raster.module_args(
-        "raster-viewshed", {"height": 30, "maxdist": 5}, (500.0, 4000.0)
-    )
-    assert "coordinates=500.000000,4000.000000" in argv
-    assert "observer_elevation=30" in argv
-    assert "max_distance=5000" in argv
-    assert any("5 km" in note for note in notes)
-
-
-def test_a_viewshed_without_a_range_says_so_and_passes_none():
-    argv, notes = raster.module_args("raster-viewshed", {"maxdist": 0}, (1.0, 2.0))
-    assert not any(a.startswith("max_distance") for a in argv)
-    assert any("not cut off" in note for note in notes)
-
-
-def test_the_curvature_of_the_earth_is_a_choice_that_is_reported():
-    argv, notes = raster.module_args("raster-viewshed", {"curvature": True}, (1.0, 2.0))
-    assert "-c" in argv
-    assert any("curvature" in note for note in notes)
-
-
-def test_an_unmapped_command_is_an_error():
-    with pytest.raises(session.GrassError):
-        raster.module_args("raster-watershed", {})
-
-
 def test_results_are_named_after_the_layer_and_never_overwrite(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     first = raster.output_path("DEM 1/2", "slope")
@@ -984,18 +938,6 @@ def test_a_render_form_offers_a_none_for_an_optional_input():
     assert by["map"]["default"] == "none"
 
 
-def test_a_viewshed_says_whether_the_viewpoint_was_picked_or_assumed():
-    _, picked = raster.module_args(
-        "raster-viewshed", {"height": 2}, (500.0, 4000.0), picked=True
-    )
-    assert any("the place picked on the map" in note for note in picked)
-    assert any("500.000000, 4000.000000" in note for note in picked)
-    _, assumed = raster.module_args("raster-viewshed", {"height": 2}, (500.0, 4000.0))
-    # Falling back to the centre of the map is the old behaviour; it is kept,
-    # but never silently.
-    assert any("no viewpoint was picked" in note for note in assumed)
-
-
 def test_a_run_keeps_to_two_minutes_unless_the_caller_asks_for_longer():
     # The desktop app stops a command at 120 seconds whatever the manifest
     # declares, and nothing tells the plugin which host it is in, so the
@@ -1496,3 +1438,70 @@ def test_a_named_mapset_becomes_the_node_the_tree_would_have_sent():
     # Neither a bare project nor a path into a map is one.
     for bad in ("", "Busoga", "raster/Busoga/PERMANENT/dem", "a/b/c", None):
         assert database.mapset_node(bad) == ""
+
+
+def test_the_reason_shown_is_the_one_that_bears_on_the_module():
+    # Each path reports its own reason, and t.rast.export is not on the
+    # raster one: answering "takes no raster" for a temporal module told the
+    # user nothing about the file path that actually stops it.
+    assert (
+        raster.refusal(
+            {
+                "family": "Temporal",
+                "reason": "takes no raster",
+                "mapset_reason": (
+                    "needs a file path to write to, which this panel does not ask for"
+                ),
+            }
+        )
+        == "needs a file path to write to, which this panel does not ask for"
+    )
+    # The generic mapset answer is no better than the raster one, so the
+    # raster one stands.
+    assert (
+        raster.refusal(
+            {
+                "family": "Imagery",
+                "reason": "needs several bands",
+                "mapset_reason": "works on a raster or vector layer",
+            }
+        )
+        == "needs several bands"
+    )
+    # "takes no raster" is true of every vector module and useful to no one.
+    assert (
+        raster.refusal(
+            {
+                "family": "Vector",
+                "reason": "takes no raster",
+                "mapset_reason": "works on a raster or vector layer",
+            }
+        )
+        == "it works on vector features, not on a raster layer"
+    )
+
+
+def test_a_vector_module_is_pointed_at_the_tools_pane():
+    said = raster.module_details(
+        {
+            "module": "v.buffer",
+            "family": "Vector",
+            "reason": "takes no raster",
+            "mapset_reason": "works on a raster or vector layer",
+            "tool": True,
+            "form": [],
+        }
+    )
+    assert "Tools pane" in said
+    # And one that did not fit the 64-tool budget says that instead.
+    missed = raster.module_details(
+        {
+            "module": "v.obscure",
+            "family": "Vector",
+            "reason": "takes no raster",
+            "mapset_reason": "works on a raster or vector layer",
+            "tool": False,
+            "form": [],
+        }
+    )
+    assert "not among them" in missed

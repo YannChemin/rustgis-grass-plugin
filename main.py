@@ -1015,22 +1015,6 @@ def describe_region(env):
     return f"{where}\n{size}"
 
 
-def picked_point(values, name="viewpoint"):
-    """Return a pick's place as ``(longitude, latitude)``, or None.
-
-    A pick answers ``{"lon", "lat", "x", "y", "crs"}``; the degrees are taken,
-    because the bridge projects them into the raster's own system itself and a
-    pick keeps the coordinates of whatever map it was picked on.
-    """
-    place = (values or {}).get(name)
-    if not isinstance(place, dict):
-        return None
-    try:
-        return float(place["lon"]), float(place["lat"])
-    except (KeyError, TypeError, ValueError):
-        return None
-
-
 def picked_box(values, name="region-box"):
     """Return a box pick's ``[west, south, east, north]`` in degrees, or None.
 
@@ -1083,86 +1067,6 @@ def set_region(req, extent):
                 "region": {"text": text},
                 "status": {"text": f"Computational region: {told}.\n{text}"},
             }
-        ),
-    }
-
-
-def run_raster_command(req):
-    """Run one GRASS raster module over a raster layer of the map.
-
-    A tool could not do this: it gets no raster and makes no host requests.
-    This command asks RustGIS to export the layer, works on the file, and asks
-    it to add the result back. See ``grass_bridge/raster.py``.
-
-    :param req: the command request
-    :return: its ``ok`` value, the panel's new state included
-    """
-    command = req["id"]
-    operation = raster.OPERATIONS[command]
-    panel = req.get("panel") or {}
-    values = panel.get("values") or {}
-
-    layers = call("host.layers") or []
-    nodes = raster.raster_nodes(layers)
-    layer = raster.choose_raster(layers, values.get("raster"))
-    name = str(layer.get("name"))
-    # The computational region decides what a raster module reads and writes,
-    # so RustGIS's own Analysis Environment is what sets it.
-    env = call("gp.env", {}) or {}
-
-    target = raster.output_path(name, operation["suffix"])
-    centre, picked = None, False
-    if operation["module"] == "r.viewshed":
-        # The panel's Viewpoint on the Map, when one was picked; otherwise the
-        # centre of the map, as before. Which was used is reported, so the
-        # viewshed never shoots from a place the user did not choose without
-        # saying so.
-        centre = picked_point(values)
-        picked = centre is not None
-        if centre is None:
-            view = call("host.view") or {}
-            centre = tuple((view.get("center") or [None, None])[:2])
-            if centre[0] is None:
-                raise session.GrassError(
-                    "RustGIS did not say where the map is centred, and no "
-                    "viewpoint was picked: press Viewpoint on the Map in the "
-                    "GRASS GIS panel and click the place"
-                )
-
-    exported, source, info = export_source(name, values)
-    budget = session.budget_asked(req.get("params"))
-    try:
-        with raster.RasterRun(progress=progress, budget=budget) as run:
-            messages = run.raster_tool(
-                command, exported, target, values, centre, env, picked=picked
-            )
-        messages += source
-    finally:
-        try:
-            os.remove(exported)
-        except OSError:
-            pass
-
-    added = call(
-        "layer.addData", {"path": target, "name": f"{name} {operation['suffix']}"}
-    )
-    messages.append(f"The result is kept at {target}.")
-    for text in messages:
-        log(text)
-    call("host.notify", {"text": f"{operation['label']}: {messages[0]}"})
-    raster.remember(operation["module"])
-    return {
-        "layer": added,
-        "messages": messages,
-        "panel": panel_answer(
-            {
-                "raster": {"nodes": nodes},
-                "source": {"text": name},
-                "band": raster.band_slider(info),
-                "region": {"text": describe_region(env)},
-                "status": {"text": "\n".join(messages)},
-            },
-            {"raster": str(layer.get("id"))},
         ),
     }
 
@@ -1480,8 +1384,6 @@ def run_command(req):
                 "GIS panel, then drag one on the map"
             )
         return set_region(req, box)
-    if command in raster.OPERATIONS:
-        return run_raster_command(req)
     raise ValueError(f"unknown command '{command}'")
 
 

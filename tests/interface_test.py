@@ -1365,25 +1365,6 @@ def test_run_module_takes_its_module_from_the_commands_parameters(monkeypatch):
     assert "r.slope.aspect cannot be run" in str(raised.value)
 
 
-def test_a_picked_viewpoint_is_read_as_degrees():
-    import main
-
-    place = {
-        "lon": -1.55,
-        "lat": 47.21,
-        "x": -172_571.0,
-        "y": 5_975_000.0,
-        "crs": "EPSG:3857",
-    }
-    # The degrees, not the map coordinates: the bridge projects them into the
-    # raster's own system itself, and a pick keeps the coordinates of whatever
-    # map it was picked on.
-    assert main.picked_point({"viewpoint": place}) == (-1.55, 47.21)
-    assert main.picked_point({"viewpoint": None}) is None
-    assert main.picked_point({}) is None
-    assert main.picked_point({"viewpoint": {"lon": "x", "lat": 1}}) is None
-
-
 def test_a_picked_box_becomes_an_extent_and_a_wrapped_one_is_refused():
     import main
 

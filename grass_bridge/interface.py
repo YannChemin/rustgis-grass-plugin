@@ -460,12 +460,11 @@ def _mapset_runnability(task):
             # "needs a 3D raster" sent the reader hunting for a map that does
             # not exist yet.
             missing.append(
-                _unsupplied(param) or "a 3D raster of the mapset, which this run does not open"
+                _unsupplied(param)
+                or "a 3D raster of the mapset, which this run does not open"
             )
             continue
-        missing.append(
-            _unsupplied(param) or (f"'{pname}'" if pname else "a parameter")
-        )
+        missing.append(_unsupplied(param) or (f"'{pname}'" if pname else "a parameter"))
     for flag in task.findall("flag"):
         if flag.get("required") != "yes":
             continue
@@ -580,9 +579,7 @@ def _render_runnability(task):
         pname = param.get("name") or ""
         if pname in offered or _text(param.find("default")):
             continue
-        missing.append(
-            _unsupplied(param) or (f"'{pname}'" if pname else "a parameter")
-        )
+        missing.append(_unsupplied(param) or (f"'{pname}'" if pname else "a parameter"))
     for flag in task.findall("flag"):
         if flag.get("required") != "yes":
             continue

@@ -322,33 +322,6 @@ def name_of(module):
 #: The raster modules, run as commands because a tool gets no raster.
 COMMANDS = [
     {
-        "id": "raster-slope",
-        "label": "Slope",
-        "help": "r.slope.aspect: the steepness of the chosen raster layer.",
-        "icon": "relief",
-        "params": '{"timeout"?: seconds} (the GRASS GIS panel chooses the '
-        "layer and the unit)",
-        "timeout": LONG_TIMEOUT,
-    },
-    {
-        "id": "raster-aspect",
-        "label": "Aspect",
-        "help": "r.slope.aspect: the direction each cell of the chosen raster faces.",
-        "icon": "directions",
-        "params": '{"timeout"?: seconds} (the GRASS GIS panel chooses the layer)',
-        "timeout": LONG_TIMEOUT,
-    },
-    {
-        "id": "raster-viewshed",
-        "label": "Viewshed",
-        "help": "r.viewshed: what is visible from the place picked on the map, "
-        "or from its centre when no viewpoint was picked.",
-        "icon": "explore",
-        "params": '{"timeout"?: seconds} (the GRASS GIS panel chooses the '
-        "layer, the viewpoint, the viewer's height and the range)",
-        "timeout": LONG_TIMEOUT,
-    },
-    {
         "id": "run-module",
         "label": "Run\nModule",
         "help": "Run the module chosen in the GRASS Modules tree on the chosen "
@@ -635,9 +608,9 @@ PANEL = {
     "state": "raster-state",
     "items": [
         {
-            "kind": "choice",
+            "kind": "tabs",
             "id": "step",
-            "label": "Step",
+            "label": "",
             "help": "Which part of the panel is shown. The steps are in the "
             "order GRASS needs them: a project before its maps, a layer and a "
             "region before a module can run on them.",
@@ -723,52 +696,7 @@ PANEL = {
             "default": 0,
             "steps": True,
         },
-        # 3. Terrain: the three shaped runs and the parameters only they take.
-        {
-            "kind": "checkbox",
-            "id": "percent",
-            "label": "Slope in percent instead of degrees",
-            "default": False,
-        },
-        {
-            "kind": "slider",
-            "id": "height",
-            "label": "Viewer's height above the ground (m)",
-            "min": 0,
-            "max": 500,
-            "default": 2,
-            "steps": True,
-        },
-        {
-            "kind": "slider",
-            "id": "maxdist",
-            "label": "Viewshed range (km; 0 for no limit)",
-            "min": 0,
-            "max": 200,
-            "default": 0,
-            "steps": True,
-        },
-        {
-            "kind": "checkbox",
-            "id": "curvature",
-            "label": "Viewshed follows the curvature of the earth",
-            "default": False,
-        },
-        {
-            "kind": "pick",
-            "id": "viewpoint",
-            "label": "Viewpoint on the Map",
-            "help": "Where the viewer stands for Viewshed. RustGIS marks the "
-            "place on the map while the panel is open. Without one the "
-            "viewshed falls back to the centre of the map, as it always did, "
-            "and says so. It runs no command of its own: pick the place, then "
-            "press Viewshed.",
-            "shape": "point",
-        },
-        {"kind": "button", "command": "raster-slope"},
-        {"kind": "button", "command": "raster-aspect"},
-        {"kind": "button", "command": "raster-viewshed"},
-        # 4. Modules.
+        # 3. Modules.
         {
             "kind": "choice",
             "id": "family",
@@ -887,6 +815,8 @@ FRENCH = {
     "Temporal": "Temporel",
     "Vector": "Vecteur",
     "Modules": "Modules",
+    "Project & data": "Projet et donnees",
+    "Layer & region": "Couche et region",
     "Terrain": "Relief",
     "Hydrology": "Hydrologie",
     "Filters": "Filtres",
@@ -905,9 +835,6 @@ FRENCH = {
     "Detect": "Detection",
     "Geometry": "Geometrie",
     "GRASS GIS": "GRASS GIS",
-    "Slope": "Pente",
-    "Aspect": "Exposition",
-    "Viewshed": "Bassin de visibilite",
     "Run\nModule": "Lancer le\nmodule",
     "Imagery\nModules": "Modules\nd'imagerie",
     "Temporal\nModules": "Modules\ntemporels",
@@ -921,16 +848,11 @@ FRENCH = {
     "Region =\nWhole Layer": "Region =\ncouche",
     "Region =\nBox": "Region =\nboite",
     "Region from a Box": "Region depuis une boite",
-    "Viewpoint on the Map": "Point de vue sur la carte",
     "Refresh\nRasters": "Actualiser\nles rasters",
     "Panel Step": "Etape du panneau",
     "Read Chosen Layer": "Lire la couche choisie",
     "Read Chosen Module": "Lire le module choisi",
     "Step": "Etape",
-    "1. Project & data": "1. Projet et donnees",
-    "2. Layer & region": "2. Couche et region",
-    "3. Terrain": "3. Relief",
-    "4. Modules": "4. Modules",
     "Imagery only": "Imagerie seulement",
     "Temporal only": "Temporel seulement",
     "GRASS database": "Base de donnees GRASS",
@@ -941,12 +863,6 @@ FRENCH = {
     "Computational region": "Region de calcul",
     "Cell size in the raster's own units (0: from the environment)": (
         "Taille de cellule dans les unites du raster (0 : celle de l'environnement)"
-    ),
-    "Slope in percent instead of degrees": "Pente en pourcents plutot qu'en degres",
-    "Viewer's height above the ground (m)": "Hauteur de l'observateur (m)",
-    "Viewshed range (km; 0 for no limit)": "Portee de visibilite (km ; 0 : sans limite)",
-    "Viewshed follows the curvature of the earth": (
-        "La visibilite tient compte de la courbure de la Terre"
     ),
     "All modules": "Tous les modules",
     "GRASS modules (runs here first)": "Modules GRASS (ceux qui tournent d'abord)",
@@ -1063,6 +979,12 @@ def build():
     chosen += rest
     left_out = chosen[MAX_TOOLS:]
     chosen = chosen[:MAX_TOOLS]
+    # A vector module that became a tool is not out of reach: it is in the
+    # Tools pane, which the panel should say rather than leaving it looking
+    # refused.
+    became_tools = set(chosen)
+    for entry in catalogue:
+        entry["tool"] = entry["module"] in became_tools
 
     tools, modules, notes = [], {}, {}
     for module in chosen:
@@ -1280,9 +1202,6 @@ def tab(tools, raster_menus=None, imagery_menus=None):
                 "label": "Terrain",
                 "layout": "small",
                 "items": [
-                    "raster-slope",
-                    "raster-aspect",
-                    "raster-viewshed",
                     *(
                         {
                             "menu": menu,

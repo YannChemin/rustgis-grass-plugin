@@ -1,17 +1,23 @@
-"""The panel's four steps, shared by the manifest and the protocol loop.
+"""The panel's three steps, shared by the manifest and the protocol loop.
 
-RustGIS draws a panel as one flat column of widgets, with no section, tab or
-accordion (``crates/ui-egui/src/pluginpanel.rs``), and it draws only the
-widgets whose runtime state says ``visible``. Everything GRASS needs -- a
-project, a layer, a region, a module and its form -- came to 24 widgets in one
-column, which is several screens of scrolling with four trees in it.
+RustGIS draws a panel as one flat column of widgets and draws only the ones
+whose runtime state says ``visible``. Everything GRASS needs -- a project, a
+layer, a region, a module and its form -- came to 24 widgets in one column,
+which is several screens of scrolling with four trees in it.
 
-So the panel is a four-step workflow instead, in the order the work is done: a
-GRASS project and its maps, then the map layer and the computational region,
-then the shaped terrain runs, then the module catalogue and its form. A
-``choice`` at the top chooses the step and every answer sets ``visible`` from
-it, so at most eight widgets are drawn at once. The steps are declared here
-because the manifest generator and the protocol loop have to agree on them.
+So the panel is a three-step workflow instead, in the order the work is done:
+a GRASS project and its maps, then the map layer and the computational
+region, then the module catalogue and its form. A ``tabs`` row at the top
+chooses the step and every answer sets ``visible`` from it, so at most eight
+widgets are drawn at once. The steps are declared here because the manifest
+generator and the protocol loop have to agree on them.
+
+There was a fourth step, Terrain, holding a viewpoint pick and the parameters
+of three shaped runs (Slope, Aspect, Viewshed). It went in 0.12.0: those are
+``r.slope.aspect`` and ``r.viewshed``, which Run Module drives from the module
+tree with their whole GRASS form, including ``r.viewshed``'s required
+``coordinates``. A hand-made subset of a module's parameters is worth keeping
+only while the real form cannot be had.
 
 Visibility is runtime state, not a manifest field: before the panel's state
 command has answered, RustGIS shows every widget. That is one frame on
@@ -22,14 +28,14 @@ SPDX-License-Identifier: Unlicense
 """
 
 #: The steps, in the order they are worked through, with the label of the
-#: dropdown option that chooses each. The numbers are part of the label
-#: because a dropdown shows one option at a time: without them the panel does
-#: not say how far along it is.
+#: tab that chooses each. A tab row shows all three at once and says which is
+#: current, so the labels carry no step numbers: those were there only because
+#: a dropdown shows one option at a time and could not say how far along the
+#: panel was.
 STEPS = (
-    ("data", "1. Project & data"),
-    ("layer", "2. Layer & region"),
-    ("terrain", "3. Terrain"),
-    ("modules", "4. Modules"),
+    ("data", "Project & data"),
+    ("layer", "Layer & region"),
+    ("modules", "Modules"),
 )
 
 #: The step the panel opens in.
@@ -41,7 +47,6 @@ FIRST = STEPS[0][0]
 #: place that step has nothing to do with.
 PICKS = {
     "region-box": "box",
-    "viewpoint": "point",
 }
 
 #: Widgets drawn in every step: the step chooser itself and the line that says
@@ -68,18 +73,6 @@ STEP_ITEMS = {
         "region-full",
         "region-box",
         "res",
-    ),
-    "terrain": (
-        "source",
-        "region",
-        "percent",
-        "height",
-        "maxdist",
-        "curvature",
-        "viewpoint",
-        "raster-slope",
-        "raster-aspect",
-        "raster-viewshed",
     ),
     "modules": (
         "source",

@@ -81,6 +81,20 @@ rustgis-grass-plugin (0.11.0) unstable; urgency=medium
     more; one that must name a map it writes still is, and now says so --
     t.rast.to.rast3 reported a missing 3D raster when what it needs is a name
     for the one it writes.
+  * Every reason a module is not run here now names this plugin's own limit:
+    where the run happens (the raster path opens a throwaway project holding
+    only the exported layer), what the panel hands over (one layer, one band)
+    or a promise it keeps (no overwrite, no writing to a path of your
+    choosing). The old wording -- "which the form cannot name" -- read as
+    though GRASS had left something out, and GRASS never does: a module's
+    --interface-description states every parameter, its type, whether it is
+    required or takes several values, its default, its permitted values and
+    whether it names something that exists or something the module creates.
+  * The panel shows the reason that bears on the module rather than whichever
+    path answered first: t.rast.export said "takes no raster" when what stops
+    it is the file path it writes to. A vector module says it works on
+    features, and points at the Tools pane when it is one of the 64 there.
+    Every refusal now also names the command line that does run the module.
   * A raster module is no longer refused for a required parameter the panel's
     form already offers. That rule was written before the form existed and
     never learned about it, so r.buffer was listed "needs distances" with its

@@ -30,28 +30,6 @@ import time
 
 from . import interface, session
 
-#: What each command does, by its local command id.
-OPERATIONS = {
-    "raster-slope": {
-        "module": "r.slope.aspect",
-        "suffix": "slope",
-        "label": "Slope",
-    },
-    "raster-aspect": {
-        "module": "r.slope.aspect",
-        "suffix": "aspect",
-        "label": "Aspect",
-    },
-    "raster-viewshed": {
-        "module": "r.viewshed",
-        "suffix": "viewshed",
-        "label": "Viewshed",
-    },
-}
-
-#: A slider gives whole numbers, so the maximum distance is in kilometres.
-METRES_PER_KM = 1000.0
-
 #: Metres in one degree of latitude, and of longitude at the equator. Used only
 #: to turn the Analysis Environment's cell size, which is in degrees, into the
 #: units of a projected raster.
@@ -184,73 +162,6 @@ def raster_nodes(layers):
         for layer in layers
         if layer.get("raster")
     ]
-
-
-def module_args(command, values, point=None, picked=False):
-    """Return the module's arguments, and what to say about them.
-
-    The input raster is always ``src`` and the output always ``out``; the
-    caller names the files.
-
-    :param command: the local command id, a key of :data:`OPERATIONS`
-    :param values: the panel's widget values
-    :param point: the viewing position in the project's own coordinates,
-        as ``(east, north)``
-    :param picked: whether that position was picked on the map rather than
-        taken from the centre of the view, which the notes say
-    :return: ``(argv, [note, ...])``
-    :raises session.GrassError: for a command with no operation, or a viewshed
-        with nowhere to look from
-    """
-    operation = OPERATIONS.get(command)
-    if not operation:
-        raise session.GrassError(f"no GRASS raster module is mapped to '{command}'")
-    values = values or {}
-    notes = []
-
-    if command == "raster-slope":
-        unit = "percent" if values.get("percent") else "degrees"
-        notes.append(f"Slope is reported in {unit}.")
-        return ["elevation=src", "slope=out", f"format={unit}"], notes
-
-    if command == "raster-aspect":
-        notes.append(
-            "Aspect is degrees clockwise from north, with flat cells at -9999 "
-            "(r.slope.aspect's -n)."
-        )
-        return ["elevation=src", "aspect=out", "-n"], notes
-
-    if point is None:
-        raise session.GrassError("the viewshed has no viewing position")
-    east, north = point
-    height = float(values.get("height", 2) or 0)
-    distance = float(values.get("maxdist", 0) or 0)
-    argv = [
-        "input=src",
-        "output=out",
-        f"coordinates={east:.6f},{north:.6f}",
-        f"observer_elevation={height:g}",
-        "-b",
-    ]
-    if distance > 0:
-        argv.append(f"max_distance={distance * METRES_PER_KM:g}")
-        notes.append(f"Visibility is cut off at {distance:g} km.")
-    else:
-        notes.append("Visibility is not cut off by distance.")
-    if values.get("curvature"):
-        argv.append("-c")
-        notes.append("The curvature of the earth is taken into account.")
-    where = (
-        "the place picked on the map"
-        if picked
-        else "the centre of the map, because no viewpoint was picked"
-    )
-    notes.append(
-        f"The viewer stands {height:g} m above the ground at {where} "
-        f"({east:.6f}, {north:.6f} in the raster's own projection). "
-        "Visible cells are 1 and invisible ones 0 (r.viewshed's -b)."
-    )
-    return argv, notes
 
 
 #: The tree branches a module node can sit under. A module appears in more
@@ -445,6 +356,30 @@ def entry_for(catalogue, module, quietly=False):
     )
 
 
+#: What ``_mapset_runnability`` says about a module that is simply not of a
+#: family that path serves. It is true and tells the user nothing.
+GENERIC_MAPSET_REASON = "works on a raster or vector layer"
+
+
+def refusal(entry):
+    """Return the reason that actually bears on this module.
+
+    Each path reports its own: ``reason`` is the raster path's, and a
+    temporal or database module is not on it, so ``t.rast.export`` answered
+    "takes no raster" when what stops it is the file path it writes to. The
+    specific reason wins over the path-shaped one.
+    """
+    mapset = (entry or {}).get("mapset_reason") or ""
+    if mapset and mapset != GENERIC_MAPSET_REASON and mapset.startswith("needs"):
+        return mapset
+    reason = (entry or {}).get("reason") or ""
+    if (entry or {}).get("family") == "Vector" and reason == "takes no raster":
+        # True of every vector module, and no use to anyone: the panel's
+        # raster path is what it is not on.
+        return "it works on vector features, not on a raster layer"
+    return reason or "no path here fits it"
+
+
 def module_details(entry):
     """Return the text under the tree saying what the chosen module needs.
 
@@ -497,13 +432,18 @@ def module_details(entry):
         # parameter of it. What stops the run is on this side, so say so in
         # those words rather than leaving the module looking under-specified.
         lines.append(
-            "This panel does not run it: "
-            + (entry.get("reason") or "no path here fits it")
-            + ". The form above still shows every parameter GRASS declares, "
-            "and `grass <mapset> --exec "
-            + entry["module"]
-            + "` runs it with them."
+            f"This panel does not run it: {refusal(entry)}. The form above "
+            "still shows every parameter GRASS declares, and "
+            f"`grass <mapset> --exec {entry['module']}` runs it with them."
         )
+        if entry.get("family") == "Vector":
+            lines.append(
+                "It is in the Tools pane, which takes its vector layer from RustGIS."
+                if entry.get("tool")
+                else "Run Module works on a raster layer or in a mapset. The "
+                "vector modules that fit the 64-tool budget are in the Tools "
+                "pane; this one is not among them."
+            )
     if entry.get("needs"):
         lines.append("Needs: " + ", ".join(entry["needs"]))
     if entry.get("temporal"):
@@ -1185,101 +1125,6 @@ class RasterRun(session.Run):
             grass=grass, progress=progress, deadline=time.monotonic() + budget
         )
         self.budget = budget
-
-    def raster_tool(
-        self, command, source, target, values=None, centre=None, env=None, picked=False
-    ):
-        """Run one raster module over a GeoTIFF and write another.
-
-        :param command: the local command id, a key of :data:`OPERATIONS`
-        :param source: the exported input GeoTIFF
-        :param target: where to write the result
-        :param values: the panel's widget values
-        :param centre: where a module that works from a point works from, as
-            ``(longitude, latitude)``: the place picked on the map, or the
-            centre of the view
-        :param picked: whether that place was picked rather than the centre of
-            the view, which the messages say
-        :param env: RustGIS's Analysis Environment, as ``gp.env`` answers it:
-            ``{"extent": [w, s, e, n], "cellSize": degrees}``
-        :return: ``[message, ...]``
-        :raises session.GrassError: when any step fails
-        """
-        operation = OPERATIONS.get(command)
-        if not operation:
-            raise session.GrassError(f"no GRASS raster module is mapped to '{command}'")
-        module = operation["module"]
-
-        self.progress("Preparing a working project...")
-        # The project takes the raster's own coordinate system, so the module
-        # works in the units the data is in and the result needs no projecting.
-        project = self._project("raster", source)
-        proj = " ".join(
-            self.exec(project, "g.proj", "-p", "-f", "format=proj4").split()
-        )
-
-        self.progress("Importing the raster...")
-        self.exec(
-            project,
-            "r.in.gdal",
-            f"input={source}",
-            "output=src",
-            "--overwrite",
-            "--quiet",
-        )
-        # The computational region, not the input, decides what a module reads
-        # and writes. A new project's region is a single cell at the origin.
-        self.exec(project, "g.region", "raster=src")
-        region = self._region(project)
-        region, region_notes, narrowed = self._apply_environment(
-            project, region, proj, env, (values or {}).get("res")
-        )
-
-        point = None
-        if centre is not None and module == "r.viewshed":
-            point = self._project_point(project, centre, region, picked)
-
-        argv, notes = module_args(command, values, point, picked)
-        if narrowed and module == "r.slope.aspect":
-            # Otherwise it puts the region back on the elevation map's own grid
-            # and the region asked for is silently ignored.
-            argv.append("-a")
-        self.progress(f"Running {module}...")
-        self.exec(project, module, *argv, "--overwrite", "--quiet")
-
-        self.progress("Writing the result...")
-        self.exec(
-            project,
-            "r.out.gdal",
-            "input=out",
-            f"output={target}",
-            "format=GTiff",
-            # A colour table GDAL cannot hold in a float GeoTIFF is an error
-            # from GDAL itself; the data matters here, not GRASS's colours.
-            "-c",
-            "--overwrite",
-            "--quiet",
-        )
-        if not os.path.exists(target):
-            raise session.GrassError(f"{module} wrote no file at {target}")
-
-        where = proj or "the raster's own projection"
-        messages = [f"{module} ran in {where}."]
-        if region:
-            messages.append(
-                "Computational region used: "
-                f"{region.get('cols', '?')} by {region.get('rows', '?')} cells of "
-                f"{region.get('ewres', '?')} by {region.get('nsres', '?')}, "
-                f"{float(region.get('w', 0)):.0f} to {float(region.get('e', 0)):.0f} east, "
-                f"{float(region.get('s', 0)):.0f} to {float(region.get('n', 0)):.0f} north."
-            )
-        messages += region_notes
-        messages += notes
-        for text, count in self.warnings.items():
-            messages.append(
-                f"GRASS: {text}" + (f" ({count} times)" if count > 1 else "")
-            )
-        return messages
 
     def free_module(self, module, argv, source, target, env=None):
         """Run any raster module over a GeoTIFF, with its own defaults.
