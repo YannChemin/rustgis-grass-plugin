@@ -634,22 +634,27 @@ def test_a_temporal_module_takes_a_dataset_of_the_chosen_mapset():
     ]
 
 
-def test_a_dataset_module_that_also_names_its_output_is_still_refused():
+def test_a_dataset_module_that_names_its_output_runs():
     # t.rast.series' shape: an old strds in, a new raster out. The dataset is
-    # offerable now; naming what it writes into the user's own mapset is not,
-    # until the bridge can promise not to overwrite.
+    # a dropdown of the mapset's own, the output a name the user types and the
+    # bridge checks against that mapset before running.
     extra = """<parameter name="input" type="string" required="yes">
       <description>Input space-time dataset</description>
       <gisprompt age="old" element="strds" prompt="strds" />
     </parameter>
-    <parameter name="output" type="string" required="yes">
+    <parameter name="output" type="string" required="yes" multiple="yes">
       <description>Name for output raster map</description>
       <gisprompt age="new" element="cell" prompt="raster" />
     </parameter>"""
     entry = interface.describe(temporal_task(extra))
-    assert entry["mapset_runnable"] is False
-    assert "output name" in entry["mapset_reason"]
-    assert "space-time" not in entry["mapset_reason"]
+    assert entry["mapset_runnable"] is True
+    assert entry["mapset_reason"] == ""
+    assert [(p["name"], p["kind"]) for p in entry["mapset_inputs"]] == [
+        ("input", "strds")
+    ]
+    assert [(p["name"], p["kind"], p["multiple"]) for p in entry["mapset_outputs"]] == [
+        ("output", "raster", True)
+    ]
 
 
 def test_an_in_place_raster_module_takes_maps_of_the_chosen_mapset():
@@ -692,14 +697,42 @@ def test_an_addon_that_mislabels_its_output_is_not_an_in_place_run():
     assert "raster or vector" in entry["mapset_reason"]
 
 
-def test_a_required_output_name_is_not_something_the_form_can_fill():
+def test_a_new_map_is_a_name_the_form_asks_for():
     extra = """<parameter name="output" type="string" required="yes">
       <description>Output raster</description>
       <gisprompt age="new" element="cell" prompt="raster" />
     </parameter>"""
     entry = interface.describe(temporal_task(extra))
+    assert entry["mapset_runnable"] is True
+    assert [(p["name"], p["kind"], p["required"]) for p in entry["mapset_outputs"]] == [
+        ("output", "raster", True)
+    ]
+
+
+def test_a_new_file_path_is_not_offered_and_says_so():
+    # A file is written wherever the user says, and nothing here can promise
+    # not to overwrite a path of their choosing, so it stays refused -- but
+    # the reason now names a file rather than "an output".
+    extra = """<parameter name="output" type="string" required="yes">
+      <description>Name for output file</description>
+      <gisprompt age="new" element="file" prompt="file" />
+    </parameter>"""
+    entry = interface.describe(temporal_task(extra))
     assert entry["mapset_runnable"] is False
-    assert "output name" in entry["mapset_reason"]
+    assert entry["mapset_reason"] == (
+        "needs a file path to write, which the form does not offer"
+    )
+    assert entry["mapset_outputs"] == []
+
+
+def test_a_new_database_table_is_not_offered_either():
+    extra = """<parameter name="to_table" type="string" required="yes">
+      <description>Table to copy to</description>
+      <gisprompt age="new" element="dbtable" prompt="dbtable" />
+    </parameter>"""
+    entry = interface.describe(temporal_task(extra))
+    assert entry["mapset_runnable"] is False
+    assert "database table" in entry["mapset_reason"]
 
 
 def test_the_panel_renders_a_display_module_from_the_chosen_mapset(
@@ -1522,14 +1555,16 @@ def test_a_3d_raster_input_is_offered_from_the_mapset():
     ]
 
 
-def test_a_3d_raster_output_is_reported_as_an_output_name():
-    # The old rule hit the grid3 branch before it looked at the age, so
-    # t.rast.to.rast3 was told it "needs a 3D raster" -- sending the reader to
-    # look for a map that does not exist yet. It needs a name for one.
+def test_a_new_3d_raster_is_a_name_too():
+    # t.rast.to.rast3's shape. The old rule hit the grid3 branch before it
+    # looked at the age and told it "needs a 3D raster", sending the reader to
+    # look for a map that does not exist yet; what it needs is a name for one.
     extra = """<parameter name="output" type="string" required="yes">
       <description>Name of the output 3D raster</description>
       <gisprompt age="new" element="grid3" prompt="raster_3d" />
     </parameter>"""
     entry = interface.describe(temporal_task(extra))
-    assert entry["mapset_runnable"] is False
-    assert entry["mapset_reason"] == "needs an output name, which the form cannot name"
+    assert entry["mapset_runnable"] is True
+    assert [(p["name"], p["kind"]) for p in entry["mapset_outputs"]] == [
+        ("output", "raster_3d")
+    ]

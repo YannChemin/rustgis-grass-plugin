@@ -1376,3 +1376,110 @@ def test_a_workspace_that_cannot_open_says_so_in_its_tree_label(tmp_path):
     assert "project not found" not in fine
     # Said nothing about it when the caller does not know.
     assert "project not found" not in database._workspace_label(path, found, None)
+
+
+SERIES = {
+    "module": "t.rast.series",
+    "mapset_inputs": [
+        {"name": "input", "kind": "strds", "label": "Input", "required": True}
+    ],
+    "mapset_outputs": [
+        {
+            "name": "output",
+            "kind": "raster",
+            "label": "Name for output raster map(s)",
+            "help": "",
+            "required": True,
+            "multiple": True,
+        }
+    ],
+    "form": [],
+}
+HELD = [("raster", "dem"), ("strds", "s2_B04@PERMANENT")]
+
+
+def test_a_new_map_is_asked_for_by_name_not_invented():
+    field = raster.output_fields(SERIES, "PERMANENT")[0]
+    assert field["id"] == "output" and field["kind"] == "text"
+    assert field["required"] is True
+    assert "must not be taken" in field["help"]
+    assert "Several names" in field["help"]
+
+
+def test_a_free_name_becomes_the_output_argument():
+    args = raster.output_args(
+        SERIES, {"form": {"output": "b04_mean"}}, HELD, "PERMANENT"
+    )
+    assert args == ["output=b04_mean"]
+
+
+def test_a_name_already_in_the_mapset_is_refused_not_overwritten():
+    # The promise this keeps: --overwrite is never passed, and a taken name is
+    # stopped before GRASS starts rather than after it has written.
+    with pytest.raises(session.GrassError, match="never overwrites"):
+        raster.output_args(SERIES, {"form": {"output": "dem"}}, HELD, "PERMANENT")
+
+
+def test_a_taken_dataset_name_is_refused_bare_of_its_mapset():
+    # The mapset lists a dataset as name@mapset and a new one is named without
+    # it, so both are compared bare or the collision would be missed.
+    entry = {
+        "module": "t.rast.extract",
+        "mapset_inputs": [],
+        "mapset_outputs": [
+            {"name": "output", "kind": "strds", "required": True, "multiple": False}
+        ],
+        "form": [],
+    }
+    with pytest.raises(session.GrassError, match="already holds"):
+        raster.output_args(entry, {"form": {"output": "s2_B04"}}, HELD, "PERMANENT")
+
+
+def test_a_name_grass_would_not_accept_is_refused():
+    for bad in (
+        "my result",
+        "a@PERMANENT",
+        ".hidden",
+        "-dash",
+        "a=b",
+        "a*",
+        "a/b",
+    ):
+        with pytest.raises(session.GrassError, match="not a name GRASS accepts"):
+            raster.output_args(SERIES, {"form": {"output": bad}}, HELD, "PERMANENT")
+
+
+def test_several_names_are_taken_for_a_multiple_output():
+    args = raster.output_args(
+        SERIES, {"form": {"output": "mean, max"}}, HELD, "PERMANENT"
+    )
+    assert args == ["output=mean,max"]
+
+
+def test_a_list_for_a_single_output_is_refused():
+    entry = {
+        **SERIES,
+        "mapset_outputs": [{**SERIES["mapset_outputs"][0], "multiple": False}],
+    }
+    with pytest.raises(session.GrassError, match="is one raster map, not a list"):
+        raster.output_args(entry, {"form": {"output": "a,b"}}, HELD, "PERMANENT")
+
+
+def test_a_missing_required_output_says_what_is_wanted():
+    with pytest.raises(session.GrassError, match="needs a name for the raster map"):
+        raster.output_args(SERIES, {"form": {}}, HELD, "PERMANENT")
+
+
+def test_an_output_name_is_not_passed_twice():
+    # It is an argument built here, so the module's own form must not also
+    # send it: GRASS takes the last of a repeated option and the check would
+    # be bypassed.
+    args = raster.mapset_args(
+        SERIES,
+        {"output": "b04_mean", "input": "s2_B04@PERMANENT"},
+        {},
+        HELD,
+        "PERMANENT",
+    )
+    assert args.count("output=b04_mean") == 1
+    assert len([a for a in args if a.startswith("output=")]) == 1

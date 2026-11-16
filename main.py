@@ -849,7 +849,7 @@ def run_module_in_mapset(catalogue, entry, values):
             f"{entry['module']} needs {', '.join(missing)} before it can run"
         )
     imported = {port["name"]: port["maps"] for port in ports}
-    args = raster.mapset_args(entry, form, imported)
+    args = raster.mapset_args(entry, form, imported, maps, mapset)
     with session.Run(progress=progress) as run:
         messages = run.mapset_module(base, project, mapset, entry["module"], args)
     for text in messages:
@@ -1289,9 +1289,14 @@ def mapset_contents(base, project, mapset, entry):
     :return: ``[(kind, name), ...]``, datasets alongside the maps
     """
     found = list(database.maps(base, project, mapset))
+    # The outputs count too: a new dataset's name is checked against the ones
+    # already there, so nothing of the user's is overwritten.
+    ports = ((entry or {}).get("mapset_inputs") or []) + (
+        (entry or {}).get("mapset_outputs") or []
+    )
     wanted = {
         port.get("kind")
-        for port in (entry or {}).get("mapset_inputs") or []
+        for port in ports
         if port.get("kind") in interface.TEMPORAL_ELEMENTS
     }
     for kind in sorted(wanted):

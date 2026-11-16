@@ -113,18 +113,24 @@ plugin:grass-vector/region-box={"panel": {"region-box": {"bbox": [-2.0, 47.0, -1
   or accepting its **Module parameters** form, and running `run-module`. The tree has
   three branches: **Runs from here** (the modules Run Module can drive), **All modules**
   (every installed module, with the reason the others cannot be driven) and **Recently
-  run**. Any readable module shows its parameters in the form. The 88 that read one
-  raster and write one run on the chosen layer; 91 temporal, database and general
-  modules run with the form in the GRASS project/mapset chosen under **Projects and
-  mapsets** (so `t.in.era5` imports its space-time dataset there); 25 change a map of
-  that same mapset in place (`r.colors`, `v.db.update`); 19 display (`d.*`)
+  run**. Any readable module shows its parameters in the form. **276 of 1,195 run**: the
+  88 that read one raster and write one run on the chosen layer; 169 temporal, database
+  and general modules run with the form in the GRASS project/mapset chosen under
+  **Projects and mapsets** (so `t.in.era5` imports its space-time dataset there, and
+  `r.colors` or `v.db.update` change a map of that mapset in place); 19 display (`d.*`)
   modules render a picture of maps from that same chosen mapset, imported back
   as an RGB layer, with an optional PNG preview; and the rest carry the reason they cannot run. The panel's **Catalogue** dropdown keeps
   all modules (`all`), only the imagery ones (`imagery`) or only the temporal ones
   (`temporal`); `imagery-state`, `temporal-state` and `all-state` set it from the
-  ribbon and move the panel to the module step. A temporal
-  module whose required parameter names a space-time dataset or a raster cannot be
-  given one by the form, so it keeps its reason.
+  ribbon and move the panel to the module step.
+- **A parameter naming something in the mapset is a dropdown of what is there**: its
+  maps, its 3D rasters (from `grid3`) and its space-time datasets (listed with
+  `t.list type=<kind> mapset=<name>` in a throwaway mapset, so the user's is never
+  locked). A parameter naming a **new** map or dataset is a text field, and the name is
+  checked before GRASS starts: its shape, and whether that mapset already holds one by
+  that name. A taken name is refused by name and `--overwrite` is never passed. What
+  stays refused is a file path to write (10 modules) and a new database table (8), each
+  saying which it is.
   A leading triangle **▸** marks a module Run Module can
   drive; the others carry their reason, such as *needs several bands*, *needs an
   imagery group* or *needs a display*, so tell the user what the module needs instead

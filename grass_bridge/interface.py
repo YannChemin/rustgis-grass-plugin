@@ -243,7 +243,16 @@ def _cannot_name(param):
     if prompt is None:
         return None
     if prompt.get("age") == "new":
-        return "an output name, which the form cannot name"
+        element = _prompt(prompt)
+        if element == "file":
+            return "a file path to write, which the form does not offer"
+        if element == "dbtable":
+            return "a new database table, which the form does not offer"
+        if _element_kind(element):
+            # A new map or dataset is offered; this is only reached for one
+            # the module's family keeps off the mapset path altogether.
+            return "an output name, which the form cannot offer here"
+        return f"a new {element or 'thing'}, which the form does not offer"
     element = _prompt(prompt)
     if element in TEMPORAL_ELEMENTS:
         # Only reached for a dataset the form cannot fill from the chosen
@@ -259,6 +268,58 @@ def _cannot_name(param):
     return None
 
 
+def _element_kind(element):
+    """Return the mapset-field kind for a gisprompt element, or "".
+
+    Not to be confused with ``_kind_of``, which answers the same question for
+    a plugin **tool** parameter and refuses most of these.
+    """
+    if element in ("raster", "cell"):
+        return "raster"
+    if element == "vector":
+        return "vector"
+    if element in ("raster_3d", "grid3"):
+        return "raster_3d"
+    return element if element in TEMPORAL_ELEMENTS else ""
+
+
+def _mapset_outputs(task):
+    """Return the new maps or datasets a module must be given a name for.
+
+    A parameter with ``age="new"`` is a thing the module creates. Only one
+    that creates a **map or dataset in the mapset** is offered, because that
+    is the only kind the plugin can check before running: it lists what the
+    mapset holds, so it can refuse a name that is taken and keep its promise
+    never to overwrite. A new file path or database table is not offered,
+    since nothing here can promise that for a path of the user's choosing.
+
+    :return: ``[{"name", "kind", "label", "help", "required", "multiple"}]``
+    """
+    outputs = []
+    for param in task.findall("parameter"):
+        prompt = param.find("gisprompt")
+        if prompt is None or prompt.get("age") != "new":
+            continue
+        kind = _element_kind(_prompt(prompt))
+        if not kind:
+            continue
+        outputs.append(
+            {
+                "name": param.get("name") or "",
+                "kind": kind,
+                "label": (
+                    _text(param.find("label"))
+                    or _text(param.find("description"))
+                    or (param.get("name") or "")
+                ),
+                "help": _text(param.find("description")),
+                "required": param.get("required") == "yes",
+                "multiple": param.get("multiple") == "yes",
+            }
+        )
+    return outputs
+
+
 def _mapset_inputs(task):
     """Return the map layers a form can choose from the selected mapset.
 
@@ -269,17 +330,11 @@ def _mapset_inputs(task):
         prompt = param.find("gisprompt")
         if prompt is None or prompt.get("age") == "new":
             continue
-        element = _prompt(prompt)
-        if element in ("raster", "cell", "vector"):
-            kind = "vector" if element == "vector" else "raster"
-        elif element in ("raster_3d", "grid3"):
-            kind = "raster_3d"
-        elif element in TEMPORAL_ELEMENTS:
-            # A space-time dataset is named like a map and lives in the
-            # mapset's temporal database, so it is offered the same way: the
-            # datasets of the chosen mapset, listed by t.list.
-            kind = element
-        else:
+        # A space-time dataset is named like a map and lives in the mapset's
+        # temporal database, so it is offered the same way: the datasets of
+        # the chosen mapset, listed by t.list.
+        kind = _element_kind(_prompt(prompt))
+        if not kind:
             continue
         inputs.append(
             {
@@ -318,10 +373,12 @@ def _mapset_runnability(task):
         "mapset_runnable": False,
         "mapset_reason": "",
         "mapset_inputs": [],
+        "mapset_outputs": [],
     }
     name = task.get("name") or ""
     family = family_of(name)
     inputs = _mapset_inputs(task)
+    outputs = _mapset_outputs(task)
     if family not in MAPSET_FAMILIES:
         if name not in INPLACE_MODULES:
             out["mapset_reason"] = "works on a raster or vector layer"
@@ -331,12 +388,17 @@ def _mapset_runnability(task):
             return out
     offered = _offerable(task)
     fillable = {port["name"] for port in inputs}
+    nameable = {port["name"] for port in outputs}
     missing = []
     for param in task.findall("parameter"):
         if param.get("required") != "yes":
             continue
         pname = param.get("name") or ""
         if pname in offered or _text(param.find("default")):
+            continue
+        # A new map or dataset is a name the user types, checked against the
+        # mapset before the run so nothing of theirs is overwritten.
+        if pname in nameable:
             continue
         element = _layer_element(param)
         if pname in fillable and element in LAYER_ELEMENTS | TEMPORAL_ELEMENTS:
@@ -366,6 +428,7 @@ def _mapset_runnability(task):
         return out
     out["mapset_runnable"] = True
     out["mapset_inputs"] = inputs
+    out["mapset_outputs"] = outputs
     return out
 
 

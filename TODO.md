@@ -403,13 +403,19 @@ hard manifest error. `UX_REFACTOR.md` is the survey this came from.
 
 ## Remaining work
 
-### TODO — Run temporal modules from a space-time dataset
+### SUPERSEDED — Run temporal modules from a space-time dataset
 
-A temporal module needs an STRDS, not one raster. A real implementation would
-export the chosen layer into the throwaway GRASS project, create and register
-an STRDS, run the module and export its raster result; a one-map STRDS would
-make most `t.rast.*` operations trivial, and the plugin ABI has no space-time
-dataset kind. Design this before offering any `t.*` command.
+This entry asked how to build an STRDS from a RustGIS layer: export the chosen layer into a
+throwaway project, create and register a one-map STRDS, run the module, export the result. It
+was never needed. The temporal modules were made runnable the other way round, in the mapset
+path: they read the **real** datasets of the project and mapset chosen under Projects and
+mapsets, which is where a user's space-time data actually is, and write their results there.
+A one-map STRDS made from a single layer would have been a toy by comparison -- most
+`t.rast.*` operations over one map are meaningless.
+
+What is genuinely not possible stands: the plugin ABI has no space-time dataset kind, so a
+`t.*` **command** on the ribbon, or a dataset as a tool parameter, is still out. The panel is
+the place for them, and that is where they now are. See the form entry below.
 
 ### DONE — A lightweight command for each panel choice
 
@@ -486,72 +492,68 @@ long it was given and how to ask for more.
 A host flag in `host.info` would let the plugin choose for itself; that belongs
 upstream in RustGIS, not here.
 
-### PARTLY DONE — Let the form make more modules runnable
+### DONE — Let the form make more modules runnable
 
-Done for temporal, database and general modules whose required parameters are
-form fields or defaulted, and for space-time datasets: **252 modules run**, each
-in the project/mapset chosen under Projects and mapsets, and `run-module` checks
+**276 modules run** from the panel's form, each in the project/mapset chosen under Projects and
+mapsets: 88 on the raster path, 169 in a mapset, 19 display modules. `run-module` checks the
 required fields first.
 
-A word on the wording this entry used to carry. It said a required dataset or
-output "the form cannot name" blocked a module, which is what the code itself
-said in `interface._cannot_name`. That was wrong, and it hid how small the work
-was. GRASS declares these parameters `type="string"` and `--help` shows nothing
-unusual about them: `t.rast.series` has a plain `input=name` and `output=name`.
-What the bridge reacts to is the `<gisprompt>` that `--help` never prints:
+A word on the wording this entry used to carry. It said a required dataset or output "the form
+cannot name" blocked a module, which is what the code itself said in `interface._cannot_name`.
+That was wrong, and it hid how small the work was. GRASS declares these parameters
+`type="string"` and `--help` shows nothing unusual about them: `t.rast.series` has a plain
+`input=name` and `output=name`. What the bridge reacts to is the `<gisprompt>` that `--help`
+never prints:
 
 ```
 input  | required yes | type string | gisprompt: age=old, element=strds
 output | required yes | type string | gisprompt: age=new, element=cell
 ```
 
-A text box would hold either name perfectly well, and the module would run. So
-refusing them was a **policy, not an inability** — and the policy was only
-defensible on one side of it.
+A text box would hold either name perfectly well. So refusing them was a **policy, not an
+inability**, and both halves are now done:
 
-Datasets are now offered (`t.list type=<kind> mapset=<name> format=line`, run in
-a throwaway mapset so the user's is never locked), and a dataset field is a
-dropdown of the mapset's own datasets, exactly like a map field. 27 modules now
-carry one and 23 of them run that did not before (the other four were already
-runnable on their optional parameters): `t.rast.list`, `t.rast.colors`,
-`t.rast.null`, `t.rast.gapfill`, `t.rast.boxplot`, `t.rast.univar`,
-`t.rast.what`, `t.vect.univar`, `t.rast3d.list`, `g.gui.tplot`, `t.oil.drift`,
-`t.spei`, `t.drought` and the rest. `stvds` and `str3ds` are offered too, not
-only `strds`.
-**No module is blocked on a dataset any more.** Verified against
-`~/grassdata/BusogaForestryCom`, whose PERMANENT mapset holds 13 real datasets:
-`t.rast.list` on `s2_B04@PERMANENT` returned its 20 Sentinel-2 maps with their
-timestamps.
+- **Inputs** (`age="old"`): a dataset parameter is a dropdown of the chosen mapset's own
+  datasets, listed with `t.list type=<kind> mapset=<name> format=line` in a throwaway mapset so
+  the user's is never locked. 27 modules carry one. 3D rasters come from `grid3` (a folder, so
+  free), which also fixed a misreport: the 3D branch ran before the age check, so
+  `t.rast.to.rast3` was told it "needs a 3D raster" when what it needs is a **name** for the one
+  it writes.
+- **Outputs** (`age="new"`): a new map or dataset is a text field, and the name is checked
+  before GRASS starts -- its shape (`G_legal_filename`'s rules) and whether the mapset already
+  holds one by that name. A taken name is refused by name; `--overwrite` is never passed. A
+  `multiple` output takes a comma list, a single one refuses one. 30 modules name what they
+  write, `t.rast.series`, `t.rast.aggregate`, `t.rast.mapcalc`, `t.rast.extract`,
+  `t.rast.patch` and `t.rename` among them.
 
-3D rasters are offered the same way, from `grid3` (a folder, so free): `g.region`,
-`r.colors`, `v.colors`, `t.rast.colors` and `t.rast3d.univar` get a dropdown of the mapset's
-voxel maps where they had a text box. It unlocks no new module, and fixes a misreported one:
-the 3D branch ran before the age check, so `t.rast.to.rast3` was told it "needs a 3D raster"
-when what it needs is a **name** for the one it writes. It now says so.
+229 -> 252 -> **276 runnable**. Verified on `~/grassdata/BusogaForestryCom` (13 real datasets):
+`t.rast.list` and `t.rast.univar` on `s2_B04@PERMANENT`, and `t.rast.series` wrote
+`zzz_claude_b04_mean` (min 1191, max 4317.6) from its 20 Sentinel-2 maps, which was then
+removed again; `output=basemap.r` was refused as taken, `output=my result@PERMANENT` as
+malformed.
 
-Still open:
-- **A required output name is still not offered**, and here the policy is worth
-  keeping until it can be replaced properly: `age="new"` means the module writes
-  into the user's own mapset, and the bridge promises never to overwrite. The
-  field is easy; honouring that promise on a name the user typed is the work.
-  36 modules need one (19 of them need nothing else): `db.copy`, `db.out.ogr`,
-  `g.ppmtopng`, `m.printws`. 17 of the 36 are the dataset modules that also
-  write a map, `t.rast.series` and `t.rast.aggregate` among them, so they are
-  waiting on this alone.
-- **Raster modules that need several rasters or bands remain commands only** —
-  113 of them (88 need 2 to 5 rasters, 25 need several bands): `i.albedo`,
-  `i.biomass`, the `i.eb.*` family, `i.cva`. This one is structural, not a
-  policy: the raster path exports the one layer chosen in the panel's tree and
-  imports one result, and there is one tree and one band slider. It is the same
-  ceiling that makes the desktop's two-minute cap bite, and the reason this
-  repo's own conclusion is that heavy raster work belongs in a crate in the
-  RustGIS tree rather than behind the plugin ABI.
-- A script still cannot reach these modules in one call. `run-module` takes a
-  `module` parameter to escape the tree-value trap, but the **mapset** has none,
-  and form values are only accepted for fields the form already holds. So a
-  script needs `data-browse` twice (the first call is what sends the tree), then
-  `panel-step`, `module-pick`, then `run-module`. The panel path is unaffected.
-  A `mapset` parameter beside `module`, and form values in the command's own
+Still open, and each for a stated reason rather than for want of a field:
+
+- **A file path to write** -- 10 modules (`t.rast.export`, `g.ppmtopng`, `m.csv.clean`,
+  `m.printws`). The promise this plugin keeps is about maps in a mapset, which it can list.
+  Nothing here can promise anything about an arbitrary path on disk, so a file output is not
+  offered rather than offered unsafely. If it is ever wanted, the honest shape is the plugin's
+  own output folder with a generated name, not a free path.
+- **A new database table** -- 8 modules (`db.copy`, `db.dropcolumn` and the `db.*` family, which
+  also need an existing table). Both halves need `db.tables`/`db.columns` run against the
+  mapset's connection, which is a GRASS run per form build; worth doing only if the `db.*`
+  family is actually wanted from the panel.
+- **Raster modules that need several rasters or bands** -- 113 (88 need 2 to 5 rasters, 25
+  several bands): `i.albedo`, `i.biomass`, the `i.eb.*` family, `i.cva`. Structural, not a
+  policy: the raster path exports the one layer chosen in the panel's tree and imports one
+  result, and there is one tree and one band slider. It is the same ceiling that makes the
+  desktop's two-minute cap bite, and the reason this repo's own conclusion is that heavy raster
+  work belongs in a crate in the RustGIS tree rather than behind the plugin ABI.
+- A script still cannot reach these modules in one call. `run-module` takes a `module`
+  parameter to escape the tree-value trap, but the **mapset** has none, and form values are only
+  accepted for fields the form already holds. So a script needs `data-browse` twice (the first
+  call is what sends the tree), then `panel-step`, `module-pick`, then `run-module`. The panel
+  path is unaffected. A `mapset` parameter beside `module`, and form values in the command's own
   params, would make it one call.
 
 ### DONE — A workspace found in a backup opens from where it actually is

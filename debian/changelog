@@ -81,6 +81,16 @@ rustgis-grass-plugin (0.11.0) unstable; urgency=medium
     more; one that must name a map it writes still is, and now says so --
     t.rast.to.rast3 reported a missing 3D raster when what it needs is a name
     for the one it writes.
+  * A module that writes a new map or dataset is given a name for it in the
+    form, and the name is checked before GRASS starts: its shape, and whether
+    the chosen mapset already holds one by that name. A taken name is refused
+    by name and --overwrite is never passed, so a name typed in haste costs an
+    error message and not a map; a multiple output takes a comma list and a
+    single one refuses one. 24 more modules run (276 in all), among them
+    t.rast.series, t.rast.aggregate, t.rast.mapcalc, t.rast.extract,
+    t.rast.patch and t.rename. A file path to write (10 modules) and a new
+    database table (8) stay refused, and the reason now says which of the two
+    it is instead of "an output name".
   * A workspace is read from where its project actually is. A .gxw records the
     database it was written for, and these files outlive the machine they were
     made on: one from 2021 naming /home/yann/grassdata and the project

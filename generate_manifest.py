@@ -1030,6 +1030,9 @@ def build():
                 "mapset_runnable": described["mapset_runnable"],
                 "mapset_reason": described["mapset_reason"],
                 "mapset_inputs": described["mapset_inputs"],
+                # The new maps or datasets it must be given names for, each
+                # checked against the mapset before the run.
+                "mapset_outputs": described["mapset_outputs"],
                 # A display module that can draw a picture from its form: the
                 # bridge gives it a cairo monitor and imports the picture.
                 "render_runnable": described["render_runnable"],

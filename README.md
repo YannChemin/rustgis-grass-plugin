@@ -45,9 +45,9 @@ They are reached three ways, because the ABI gives three and each has a ceiling:
 |---|---|---|
 | **Tools**, with a generated form in the Tools pane | 64 vector modules | a manifest holds **64 tools**, and a tool takes no raster, so only vector modules qualify: 128 do, half of them fit |
 | **Commands** on the ribbon | Slope, Aspect, Viewshed, **18 common raster modules** and **7 imagery modules** in menus by theme, the region and the database | a manifest holds up to **256 commands**, and a command opens no dialog, so each needs the panel to be told anything |
-| **Run Module**, from the panel's tree | **all 1,195** are reached and show their parameters; **252** can be run: the **88** that read one raster and write one, **145** temporal, database and general ones whose form is all they need (imports such as `t.in.era5`, changes to a map of the chosen mapset in place such as `r.colors` and `v.db.update`, and the modules that work on a space-time dataset of that mapset such as `t.rast.list` and `t.rast.colors`), and **19** display modules that render a picture | a command has no form of its own, so the panel's **Module parameters** form sends the values it holds; the rest still need a name for what they write, or several rasters at once |
+| **Run Module**, from the panel's tree | **all 1,195** are reached and show their parameters; **276** can be run: the **88** that read one raster and write one, **169** temporal, database and general ones whose form is all they need (imports such as `t.in.era5`, changes to a map of the chosen mapset in place such as `r.colors` and `v.db.update`, and the modules that read a space-time dataset of that mapset and write a new map or dataset into it, such as `t.rast.list` and `t.rast.series`), and **19** display modules that render a picture | a command has no form of its own, so the panel's **Module parameters** form sends the values it holds; the rest need several rasters at once, a file path, or a database table |
 
-The tree is searchable and has three branches: **Runs from here** (the 252), **All modules**
+The tree is searchable and has three branches: **Runs from here** (the 276), **All modules**
 (all 1,195, each with its reason for not running here) and **Recently run**. A **Catalogue**
 dropdown above it keeps all modules, only the imagery (`i.*`) ones, or only the temporal
 (`t.*`) ones; the ribbon's **Modules › Catalogue** menu sets the same filter and brings the
@@ -58,10 +58,12 @@ Not every module reads one raster and writes another, so **Run Module** has thre
   in. It runs from the form, writing into the project and mapset chosen under **Projects and
   mapsets**, so `t.in.era5` downloads a variable straight into a mapset and `r.colors` changes a
   map there in place. A parameter that names a **space-time dataset** becomes a dropdown of that
-  mapset's own datasets, the way a map parameter becomes a dropdown of its maps, so
-  `t.rast.list`, `t.rast.colors`, `t.rast.univar` and 24 others run from the form. One that must
-  **name what it writes** keeps its reason: `age="new"` means a new map in the user's own
-  mapset, and the bridge will not invent a name it cannot promise is free.
+  mapset's own datasets, the way a map parameter becomes a dropdown of its maps, and one that
+  names a **new map or dataset** becomes a text box whose name is checked against that mapset
+  before the run. So `t.rast.list`, `t.rast.colors`, `t.rast.series`, `t.rast.aggregate`,
+  `t.rast.mapcalc` and the rest run from the form. What stays refused is a **file path** to
+  write (10 modules) and a **new database table** (8): nothing here can promise not to
+  overwrite a path of the user's choosing, so it is not offered rather than offered unsafely.
 - A **display** module (`d.*`) draws a picture of maps from that same mapset rather than writing
   one. The 19 that can draw without a monitor return it as an RGB raster layer, optionally with
   a PNG preview. Every input of a render comes from that mapset, and the fields stay visible when
@@ -83,8 +85,8 @@ selection leaves the parameter out, so GRASS uses its own default. Changing the 
 keeps the values of fields with the same name and starts the new ones at their defaults.
 
 So "every GRASS module" is true for *reaching* them and for *showing their parameters*: 1,195
-forms are generated from the installation. It is false for *running* them from the panel: 252
-can be run, and the rest still need a name for what they write, or several rasters at once. The 64-tool form
+forms are generated from the installation. It is false for *running* them from the panel: 276
+can be run, and the rest need several rasters at once, a file path or a database table. The 64-tool form
 budget is the ABI's; the panel's form has no such budget.
 
 ### The panel: four steps, not one column
@@ -499,6 +501,29 @@ Nothing about such a parameter is visible in `--help`: GRASS declares it `type="
 any other name. What marks it is the `<gisprompt>` in the module's interface description —
 `age="old" element="strds"` for a dataset it reads, `age="new"` for a map it writes — and that
 is what the bridge reads to decide which fields it can fill.
+
+## A name for what a module writes, and the promise around it
+
+A module such as `t.rast.series` or `t.rast.aggregate` must be told what to call the map it
+writes. The bridge **does not invent that name**, and the reason is not shyness: these modules
+run in the user's own mapset, so a guessed name either collides with something real or scatters
+`output_1` maps through their data. The name is typed into a text field, and what the bridge
+adds is the check:
+
+| | |
+|---|---|
+| Shape | Refused if GRASS would refuse it: no spaces, quotes, `@`, comma, `=`, `*`, `~` or `/`, and not starting with a dot or a dash |
+| Already there | Refused by name — `the PERMANENT mapset already holds a raster map called basemap.r, and this plugin never overwrites: choose another name for output, or remove that one in GRASS first` |
+| A dataset | Compared bare: a mapset lists one as `name@mapset` and a new one is named without it, so the collision would otherwise be missed |
+| Several results | A `multiple` output takes a comma-separated list (`t.rast.series method=average,maximum`); a single one refuses a list rather than letting GRASS take the first |
+
+All of it happens **before GRASS is started**, and `--overwrite` is never passed. That is the
+whole promise: a name typed in haste costs an error message, not a map.
+
+Three kinds of output stay refused, and the reason now names which: a **file path** (`t.rast.export`,
+`g.ppmtopng` — the plugin cannot promise anything about a path of the user's choosing), a **new
+database table** (`db.copy`), and a mapset name (`g.mapset`). The message says `needs a file path
+to write, which the form does not offer` rather than the old catch-all about an output name.
 
 ## The two-minute cap
 

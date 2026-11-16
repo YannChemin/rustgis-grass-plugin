@@ -839,6 +839,107 @@ def render_form(entry, maps, mapset=None):
     return fields
 
 
+#: What GRASS refuses in a new map's name (G_legal_filename): a name may not
+#: start with a dot or a dash, and may hold none of these characters.
+ILLEGAL_IN_NAME = set("/\"'@,=*~ \t\r\n")
+
+
+def output_fields(entry, mapset=None):
+    """Return one text field for each new map or dataset to be named.
+
+    The name is typed, not invented. The bridge will not make one up: these
+    modules write into the user's own mapset, and a guessed name either
+    collides with something real or scatters ``output_1`` maps through their
+    data. What the bridge does instead is check the name before the run, so
+    its promise never to overwrite is kept without ``--overwrite`` ever being
+    passed.
+    """
+    where = f"the {mapset} mapset" if mapset else "the chosen mapset"
+    fields = []
+    for port in (entry or {}).get("mapset_outputs") or []:
+        word = kind_word(port.get("kind"))
+        several = (
+            " Several names, separated by commas, for several results."
+            if port.get("multiple")
+            else ""
+        )
+        field = {
+            "id": port["name"],
+            "kind": "text",
+            "label": interface._short_label(port.get("label") or port["name"]),
+            "help": (
+                (port.get("help") + " " if port.get("help") else "")
+                + f"A name for the new {word} in {where}. It must not be "
+                "taken: nothing of yours is overwritten." + several
+            )[:2000],
+        }
+        if port.get("required"):
+            field["required"] = True
+        fields.append(field)
+    return fields
+
+
+def output_args(entry, values, maps, mapset=None):
+    """Return the ``name=value`` arguments for the maps a module writes.
+
+    Each name is checked here, before GRASS is started: its shape, and
+    whether the chosen mapset already holds a map or dataset of that kind by
+    that name. A taken name is refused rather than overwritten, and refused
+    loudly, so nothing of the user's is lost to a name typed in haste.
+
+    :raises session.GrassError: on a missing, malformed or taken name
+    """
+    values = _with_form(values)
+    where = f"the {mapset} mapset" if mapset else "the chosen mapset"
+    args = []
+    for port in (entry or {}).get("mapset_outputs") or []:
+        raw = str(values.get(port["name"]) or "").strip()
+        names = [part.strip() for part in raw.split(",") if part.strip()]
+        if not names:
+            if port.get("required"):
+                raise session.GrassError(
+                    f"{entry['module']} needs a name for the "
+                    f"{kind_word(port.get('kind'))} it writes "
+                    f"({port['name']}), in {where}"
+                )
+            continue
+        if len(names) > 1 and not port.get("multiple"):
+            raise session.GrassError(
+                f"{entry['module']}: {port['name']} is one "
+                f"{kind_word(port.get('kind'))}, not a list: {raw}"
+            )
+        taken = _taken_names(maps, port.get("kind"))
+        for name in names:
+            _check_name(entry["module"], port, name, taken, where)
+        args.append(f"{port['name']}={','.join(names)}")
+    return args
+
+
+def _taken_names(maps, kind):
+    """Return the bare names of the ``kind`` things a mapset already holds.
+
+    A dataset is listed as ``name@mapset`` and a new one is named without the
+    mapset, so both are compared bare.
+    """
+    return {name.split("@", 1)[0] for name in _map_names(maps, kind)}
+
+
+def _check_name(module, port, name, taken, where):
+    """Raise when a new map's name is malformed or already in use."""
+    if name[0] in ".-" or set(name) & ILLEGAL_IN_NAME:
+        raise session.GrassError(
+            f"{module}: {name!r} is not a name GRASS accepts for a "
+            f"{kind_word(port.get('kind'))}: no spaces, quotes, @, comma, "
+            "=, *, ~ or /, and not starting with a dot or a dash"
+        )
+    if name in taken:
+        raise session.GrassError(
+            f"{module}: {where} already holds a {kind_word(port.get('kind'))} "
+            f"called {name}, and this plugin never overwrites: choose another "
+            f"name for {port['name']}, or remove that one in GRASS first"
+        )
+
+
 def mapset_form(entry, maps, mapset=None):
     """Return a mapset module's form, with a field for each map it reads.
 
@@ -846,7 +947,12 @@ def mapset_form(entry, maps, mapset=None):
     than writing a new one, so its map parameters are choices from that
     mapset. The module's own parameters follow them.
     """
-    return _with_module_form(entry, (entry or {}).get("mapset_inputs"), maps, mapset)
+    fields = _map_fields((entry or {}).get("mapset_inputs"), maps, mapset)
+    fields += output_fields(entry, mapset)
+    named = {port["name"] for port in (entry or {}).get("mapset_inputs") or []}
+    named |= {port["name"] for port in (entry or {}).get("mapset_outputs") or []}
+    fields += [field for field in form_of(entry) if field["id"] not in named]
+    return fields[: interface.MAX_FORM_FIELDS]
 
 
 def _map_ports(entry, inputs, values, maps, mapset=None):
@@ -988,6 +1094,7 @@ def _layer_args(entry, inputs, values, imported):
     """Return the map arguments, then the module's own form arguments."""
     values = _with_form(values)
     names = {port["name"] for port in inputs or []}
+    names |= {port["name"] for port in (entry or {}).get("mapset_outputs") or []}
     form_values = {
         name: value
         for name, value in values.items()
@@ -1022,15 +1129,20 @@ def render_args(entry, values, imported):
     return args
 
 
-def mapset_args(entry, values, imported):
-    """Return a mapset module's arguments for maps of the chosen mapset.
+def mapset_args(entry, values, imported, maps=(), mapset=None):
+    """Return a mapset module's arguments: its maps, its outputs, its form.
 
     :param entry: a catalogue entry with ``mapset_inputs``
     :param values: the panel's form values
     :param imported: ``{port name: [GRASS map name, ...]}``
+    :param maps: the chosen mapset's ``[(kind, name), ...]``, to check the
+        output names against
     :return: a list of ``name=value`` and ``-flag`` arguments
     """
-    return _layer_args(entry, (entry or {}).get("mapset_inputs"), values, imported)
+    args = output_args(entry, values, list(maps), mapset)
+    return args + _layer_args(
+        entry, (entry or {}).get("mapset_inputs"), values, imported
+    )
 
 
 def output_dir():
