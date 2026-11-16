@@ -502,6 +502,40 @@ any other name. What marks it is the `<gisprompt>` in the module's interface des
 `age="old" element="strds"` for a dataset it reads, `age="new"` for a map it writes — and that
 is what the bridge reads to decide which fields it can fill.
 
+## Reaching a module from a script, in one call
+
+The panel is a good way to run a module and a poor way to be scripted. RustGIS keeps a tree's
+value only while that value was among the nodes the plugin last sent, and a form takes values
+only for the fields it currently holds, so naming a module, a mapset and some parameters from
+outside the panel used to take four calls to walk the panel there and a fifth to run. `run-module`
+takes all three in the command's own parameters instead:
+
+```
+plugin:grass-vector/run-module={"module": "t.rast.series",
+                                "mapset": "Busoga/PERMANENT",
+                                "values": {"input": "s2_B04@PERMANENT",
+                                           "method": "average",
+                                           "output": "b04_mean"}}
+```
+
+`mapset` is `"<project>/<mapset>"`, or a full `mapset/<project>/<mapset>` node id. `values` are
+the module's parameters by the form's own field ids. Both are laid **over** the panel, so a
+parameter wins where both say something and the rest of the panel is untouched.
+
+They are **not a way around a check**. The same code runs either way, so a mapset that is not
+there, a dataset that mapset does not hold, and an output name already taken are each refused
+exactly as they are from the panel:
+
+```
+t.rast.list runs in a GRASS mapset, and Nowhere/PERMANENT is not one of /home/yann/grassdata
+t.rast.list: nope@PERMANENT is not a space-time raster dataset of the PERMANENT mapset
+t.rast.series: the PERMANENT mapset already holds a raster map called basemap.r, and this
+plugin never overwrites: choose another name for output, or remove that one in GRASS first
+```
+
+The raster path still needs a layer RustGIS holds, which is what `raster` names, so there is
+nothing to add there: a script that has no layer loaded has nothing to run a raster module on.
+
 ## A name for what a module writes, and the promise around it
 
 A module such as `t.rast.series` or `t.rast.aggregate` must be told what to call the map it

@@ -81,6 +81,14 @@ rustgis-grass-plugin (0.11.0) unstable; urgency=medium
     more; one that must name a map it writes still is, and now says so --
     t.rast.to.rast3 reported a missing 3D raster when what it needs is a name
     for the one it writes.
+  * run-module takes mapset ("<project>/<mapset>") and values (the module's
+    parameters by their form field ids) beside module, so a script reaches a
+    module in one call instead of walking the panel there in four: a tree
+    keeps a value only while it was among the nodes last sent, and a form
+    takes only the fields it holds. The parameters are laid over the panel and
+    go through the same checks, so a mapset that is not there, a dataset the
+    mapset does not hold and a taken output name are refused exactly as from
+    the panel.
   * A module that writes a new map or dataset is given a name for it in the
     form, and the name is checked before GRASS starts: its shape, and whether
     the chosen mapset already holds one by that name. A taken name is refused

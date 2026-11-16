@@ -1483,3 +1483,12 @@ def test_an_output_name_is_not_passed_twice():
     )
     assert args.count("output=b04_mean") == 1
     assert len([a for a in args if a.startswith("output=")]) == 1
+
+
+def test_a_named_mapset_becomes_the_node_the_tree_would_have_sent():
+    assert database.mapset_node("Busoga/PERMANENT") == "mapset/Busoga/PERMANENT"
+    # A full node id is passed through, so either spelling works.
+    assert database.mapset_node("mapset/Busoga/PERMANENT") == "mapset/Busoga/PERMANENT"
+    # Neither a bare project nor a path into a map is one.
+    for bad in ("", "Busoga", "raster/Busoga/PERMANENT/dem", "a/b/c", None):
+        assert database.mapset_node(bad) == ""

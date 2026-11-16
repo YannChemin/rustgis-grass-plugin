@@ -1568,3 +1568,33 @@ def test_a_new_3d_raster_is_a_name_too():
     assert [(p["name"], p["kind"]) for p in entry["mapset_outputs"]] == [
         ("output", "raster_3d")
     ]
+
+
+def test_a_command_s_parameters_are_laid_over_the_panel():
+    import main
+
+    values = {"database": "mapset/A/PERMANENT", "form": {"input": "from_panel"}}
+    out = main.with_params(
+        values,
+        {"mapset": "B/PERMANENT", "values": {"output": "new", "input": "from_params"}},
+    )
+    # A parameter wins where both say something, and the rest of the panel is
+    # left alone.
+    assert out["database"] == "mapset/B/PERMANENT"
+    assert out["form"] == {"input": "from_params", "output": "new"}
+    # Nothing given means nothing changed.
+    assert main.with_params(values, {}) == values
+
+
+def test_a_mapset_parameter_that_names_no_mapset_is_refused():
+    import main
+
+    with pytest.raises(session.GrassError, match="is not a project and mapset"):
+        main.with_params({}, {"mapset": "just-one-part"})
+
+
+def test_module_values_must_be_an_object():
+    import main
+
+    with pytest.raises(session.GrassError, match="go in an object"):
+        main.with_params({}, {"values": "input=a"})

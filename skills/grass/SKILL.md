@@ -205,10 +205,24 @@ plugin:grass-vector/run-module={"module": "r.slope.aspect", "panel": {"raster": 
 plugin:grass-vector/r-watershed={"panel": {"raster": "3", "band": 1}}
 ```
 
-  `run-module` takes `module` in the command's own parameters, which is the way to run
-  one from a script: a tree keeps a value only when it was among the nodes last sent,
-  so `{"panel": {"modules": "all/r.slope.aspect"}}` alone needs the panel to have been
-  brought to its module step first.
+  `run-module` takes `module`, `mapset` and `values` in the command's own parameters,
+  which is the way to run one from a script: a tree keeps a value only when it was
+  among the nodes last sent and a form takes only the fields it currently holds, so
+  `{"panel": {"modules": "all/r.slope.aspect"}}` alone needs the panel to have been
+  brought to its module step first. A module that runs in a mapset is one call:
+
+```
+plugin:grass-vector/run-module={"module": "t.rast.series", "mapset": "Busoga/PERMANENT", "values": {"input": "s2_B04@PERMANENT", "method": "average", "output": "b04_mean"}}
+plugin:grass-vector/run-module={"module": "t.rast.list", "mapset": "Busoga/PERMANENT", "values": {"input": "s2_B04@PERMANENT"}}
+```
+
+  `mapset` is `"<project>/<mapset>"` (a full `mapset/<project>/<mapset>` node id is
+  taken too) and `values` are the module's parameters by their form field ids. They are
+  laid **over** the panel, so a parameter wins where both say something. **They are not
+  a way around a check**: the named mapset must exist, a map or dataset must be one that
+  mapset holds, and an output name is still refused when it is taken -- so report the
+  refusal to the user rather than retrying with `--overwrite`, which this plugin never
+  passes.
 
   `raster` is the layer **id** as `host.layers` gives it, not its name. Without one,
   the active raster layer is used, or the only one if there is just one. `modules`

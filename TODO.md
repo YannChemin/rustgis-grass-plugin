@@ -549,12 +549,13 @@ Still open, and each for a stated reason rather than for want of a field:
   result, and there is one tree and one band slider. It is the same ceiling that makes the
   desktop's two-minute cap bite, and the reason this repo's own conclusion is that heavy raster
   work belongs in a crate in the RustGIS tree rather than behind the plugin ABI.
-- A script still cannot reach these modules in one call. `run-module` takes a `module`
-  parameter to escape the tree-value trap, but the **mapset** has none, and form values are only
-  accepted for fields the form already holds. So a script needs `data-browse` twice (the first
-  call is what sends the tree), then `panel-step`, `module-pick`, then `run-module`. The panel
-  path is unaffected. A `mapset` parameter beside `module`, and form values in the command's own
-  params, would make it one call.
+- ~~A script still cannot reach these modules in one call.~~ **Done**: `run-module` now takes
+  `mapset` (`"<project>/<mapset>"`, or a full node id) and `values` (the module's parameters by
+  their form field ids) beside `module`, laid over the panel so a parameter wins where both say
+  something. Five calls became one. They go through the same code, so nothing is bypassed: a
+  mapset that is not there, a dataset the mapset does not hold and a taken output name are each
+  refused as they are from the panel. The raster path needs no equivalent -- it needs a layer
+  RustGIS holds, which `raster` already names.
 
 ### DONE — A workspace found in a backup opens from where it actually is
 
