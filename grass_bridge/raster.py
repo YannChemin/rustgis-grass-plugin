@@ -493,10 +493,16 @@ def module_details(entry):
             "also write the picture itself."
         )
     else:
+        # GRASS states this module exactly, and the form above shows every
+        # parameter of it. What stops the run is on this side, so say so in
+        # those words rather than leaving the module looking under-specified.
         lines.append(
-            "Not runnable from this panel: "
-            + (entry.get("reason") or "it needs a form")
-            + ". The form above shows the parameters it takes."
+            "This panel does not run it: "
+            + (entry.get("reason") or "no path here fits it")
+            + ". The form above still shows every parameter GRASS declares, "
+            "and `grass <mapset> --exec "
+            + entry["module"]
+            + "` runs it with them."
         )
     if entry.get("needs"):
         lines.append("Needs: " + ", ".join(entry["needs"]))

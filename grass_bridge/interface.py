@@ -69,7 +69,7 @@ INPLACE_MODULES = frozenset(
 #: draw it: d.legend needs a raster (or a 3D raster) to have anything to show.
 RENDER_OPTIONAL_INPUT = frozenset({"d.legend"})
 
-#: Display modules that wait for a click or an editor, which a form cannot
+#: Display modules that wait for a click or an editor, which no form can
 #: give them even while a cairo monitor is running.
 RENDER_INTERACTIVE = frozenset({"d.what.rast", "d.what.vect", "d.rast.edit"})
 
@@ -109,9 +109,10 @@ def _text(node):
 def _kind_of(param):
     """Return the RustGIS parameter kind for one GRASS ``<parameter>``.
 
-    ``None`` means the bridge cannot offer it: an output name, or an input of
-    a kind a plugin tool cannot receive (a raster, a 3D raster, a database
-    table).
+    ``None`` means this plugin does not put it on a tool: something the
+    module creates, or an input of a kind the RustGIS tool ABI has no
+    parameter for (a raster, a 3D raster, a database table). GRASS states all
+    of them precisely; the limit is on this side.
     """
     prompt = param.find("gisprompt")
     if prompt is not None:
@@ -272,34 +273,48 @@ def _offerable(task):
     return names
 
 
-def _cannot_name(param):
-    """Return what a form cannot name for a parameter, or None when it can."""
+def _unsupplied(param):
+    """Return why this plugin cannot supply a parameter, or None when it can.
+
+    **Nothing here is about GRASS being unclear.** A module's
+    ``--interface-description`` states every parameter exactly: its name,
+    type, whether it is required, whether it takes several values, its
+    default, its permitted values, and a ``<gisprompt>`` saying whether it
+    names something that already exists (``age="old"``) or something the
+    module creates (``age="new"``), and of what kind. The bridge reads all of
+    it. Every refusal below is this plugin's own limit, and says which of
+    three it is:
+
+    * **where the run happens** -- the raster path runs the module in a
+      throwaway project holding only the exported layer, so a map, dataset or
+      table of the user's mapset is perfectly well described and simply not
+      in the project the module opens;
+    * **what the panel hands over** -- one layer tree and one band slider;
+    * **a promise this plugin keeps** -- it does not write to a path of the
+      user's choosing, and never overwrites.
+    """
     prompt = param.find("gisprompt")
     if prompt is None:
         return None
-    if prompt.get("age") == "new":
-        element = _prompt(prompt)
-        if element == "file":
-            return "a file path to write, which the form does not offer"
-        if element == "dbtable":
-            return "a new database table, which the form does not offer"
-        if _element_kind(element):
-            # A new map or dataset is offered; this is only reached for one
-            # the module's family keeps off the mapset path altogether.
-            return "an output name, which the form cannot offer here"
-        return f"a new {element or 'thing'}, which the form does not offer"
     element = _prompt(prompt)
+    if prompt.get("age") == "new":
+        if element == "file":
+            return "writes to a file path, which this panel does not ask for"
+        if element == "dbtable":
+            return "creates a database table, which this panel does not ask for"
+        if _element_kind(element):
+            # A new map or dataset is asked for by name on the mapset path;
+            # this is only reached for a module whose family never goes there.
+            return "creates a map this panel asks for only on a mapset run"
+        return f"creates a {element or 'thing'} this panel does not ask for"
     if element in TEMPORAL_ELEMENTS:
-        # Only reached for a dataset the form cannot fill from the chosen
-        # mapset (a module of a family that does not run there); one it can
-        # is offered as a choice, like a map.
-        return "a space-time dataset, which the form cannot offer"
+        return "reads a space-time dataset, which this run does not open"
     if element in ("raster", "cell", "raster_3d", "grid3"):
-        return "a raster, which the form cannot name"
+        return "reads another raster of the mapset, which this run does not open"
     if element == "vector":
-        return "a vector map, which the form cannot name"
+        return "reads a vector map of the mapset, which this run does not open"
     if element == "dbtable":
-        return "a database table, which the form cannot name"
+        return "reads a database table, which this panel does not list"
     return None
 
 
@@ -394,8 +409,9 @@ def _mapset_runnability(task):
     Temporal, database and general modules do not read one raster and write
     another: they create or change datasets in a GRASS project. The panel's
     form names their parameters, and the project/mapset chosen under Projects
-    and mapsets says where the work goes. A required parameter the form cannot
-    name (a raster, a space-time dataset, an output) still stops the module.
+    and mapsets says where the work goes. What still stops a module is a
+    parameter this plugin will not supply -- a path on disk to write to, or a
+    database table -- never anything GRASS leaves unsaid.
 
     A raster or vector module that writes no new dataset is also offered here
     when it works on maps of the selected mapset: r.colors changes a map's
@@ -444,11 +460,11 @@ def _mapset_runnability(task):
             # "needs a 3D raster" sent the reader hunting for a map that does
             # not exist yet.
             missing.append(
-                _cannot_name(param) or "a 3D raster, which the form cannot offer"
+                _unsupplied(param) or "reads a 3D raster of the mapset, which this run does not open"
             )
             continue
         missing.append(
-            _cannot_name(param) or (f"'{pname}'" if pname else "a parameter")
+            _unsupplied(param) or (f"'{pname}'" if pname else "a parameter")
         )
     for flag in task.findall("flag"):
         if flag.get("required") != "yes":
@@ -565,7 +581,7 @@ def _render_runnability(task):
         if pname in offered or _text(param.find("default")):
             continue
         missing.append(
-            _cannot_name(param) or (f"'{pname}'" if pname else "a parameter")
+            _unsupplied(param) or (f"'{pname}'" if pname else "a parameter")
         )
     for flag in task.findall("flag"):
         if flag.get("required") != "yes":
