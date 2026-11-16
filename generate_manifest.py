@@ -399,9 +399,24 @@ COMMANDS = [
         "id": "data-add",
         "label": "Add\nMap",
         "help": "Add the map chosen in the GRASS Data tree to this project, "
-        "exported to a format RustGIS reads.",
+        "exported to a format RustGIS reads, and put the view in that GRASS "
+        "project's own coordinate system.",
         "icon": "add_data",
-        "params": "{} (the panel's tree chooses the map)",
+        "params": '{"map"?: "raster/<project>/<mapset>/<name>"} (without it '
+        "the panel's tree chooses the map)",
+        "timeout": LONG_TIMEOUT,
+    },
+    {
+        "id": "data-workspace",
+        "label": "Load\nWorkspace",
+        "help": "Open the GRASS workspace (.gxw) chosen under Workspaces as "
+        "this project: its layers, its coordinate system and its extent. "
+        "This replaces the current project.",
+        "icon": "folder_open",
+        "params": '{"workspace"?: "workspace/<percent-encoded path>", '
+        '"discard"?: true} (without them the panel\'s tree chooses it, and a '
+        "project with unsaved changes stops the load)",
+        "timeout": LONG_TIMEOUT,
     },
     {
         "id": "data-browse",
@@ -635,11 +650,15 @@ PANEL = {
             "id": "database",
             "label": "Projects and mapsets",
             "help": "The database GRASS itself uses. Choose a mapset to list "
-            "its maps, then a map, then Add Map.",
+            "its maps, then a map, then Add Map. The workspaces found "
+            "under the database and the home folder are listed first; "
+            "choosing one and pressing Load Workspace opens it as this "
+            "project.",
             "search": True,
             "command": "data-browse",
         },
         {"kind": "button", "command": "data-add"},
+        {"kind": "button", "command": "data-workspace"},
         {"kind": "button", "command": "data-folder"},
         # 2. Layer and region.
         {
@@ -893,6 +912,8 @@ FRENCH = {
     "All\nModules": "Tous les\nmodules",
     "GRASS\nDatabase": "Base GRASS",
     "Add\nMap": "Ajouter\nla carte",
+    "Load\nWorkspace": "Charger\nl'espace",
+    "Load Workspace": "Charger l'espace de travail",
     "Browse\nMapset": "Parcourir\nle jeu",
     "Region =\nMap View": "Region =\nvue",
     "Region =\nWhole Layer": "Region =\ncouche",
@@ -1069,9 +1090,7 @@ def build():
     rasters = sum(1 for entry in catalogue if entry["raster"])
     runnable = sum(1 for entry in catalogue if entry["runnable"])
     in_mapset = sum(
-        1
-        for entry in catalogue
-        if entry["mapset_runnable"] and not entry["runnable"]
+        1 for entry in catalogue if entry["mapset_runnable"] and not entry["runnable"]
     )
     renders = sum(1 for entry in catalogue if entry["render_runnable"])
     print(
@@ -1235,7 +1254,12 @@ def tab(tools, raster_menus=None, imagery_menus=None):
             {
                 "label": "Data",
                 "layout": "small",
-                "items": ["data-folder", "data-add", "data-browse"],
+                "items": [
+                    "data-folder",
+                    "data-add",
+                    "data-workspace",
+                    "data-browse",
+                ],
             },
             {
                 "label": "Region",

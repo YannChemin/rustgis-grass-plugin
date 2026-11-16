@@ -28,7 +28,7 @@ import os
 import pathlib
 import sys
 
-from grass_bridge import database, panel, raster, session
+from grass_bridge import database, interface, panel, raster, session
 
 HERE = pathlib.Path(__file__).parent
 
@@ -225,6 +225,14 @@ NOT_READABLE = (
 )
 
 
+#: Said whenever a picture of maps arrives as a layer: a composed imagery
+#: group or a display module's render is colours, not the values behind them.
+NOT_DATA = (
+    "This layer holds a picture of the bands, not their values: it is for "
+    "looking at, not for running analysis on."
+)
+
+
 def panel_values(req):
     """Return the panel's widget values from a request.
 
@@ -293,7 +301,7 @@ def browse_database(req):
     if module and (module.get("render_runnable") or module.get("mapset_inputs")):
         base = database.gisdbase()
         target = database.chosen_mapset(base, chosen) if base else None
-        maps = database.maps(base, *target) if target else []
+        maps = mapset_contents(base, *target, module) if target else []
         mapset = target[1] if target else ""
         items["form"] = {
             "fields": (
@@ -306,15 +314,28 @@ def browse_database(req):
     # node is read here rather than with database.parse_node, which refuses
     # anything but a map.
     parts = str(chosen or "").split(database.SEP)
-    named = len(parts) == 4 and parts[0] in ("raster", "vector")
-    items["status"] = {
-        "text": f"{parts[3]}@{parts[2]}: press Add Map."
-        if named
-        else f"{'/'.join(parts[1:])}: choose a map in it."
-        if len(parts) > 2
-        else "Choose a project and a mapset."
-    }
+    named = len(parts) == 4 and parts[0] in ("raster", "vector", "group")
+    workspace = parts[0] == "workspace" and len(parts) == 2
+    if workspace:
+        opening = database.read_workspace(database.parse_workspace_node(chosen))
+        said = (
+            f"{opening['project']}/{opening['mapset']}, "
+            f"{len(opening['layers'])} layer(s): press Load Workspace, which "
+            "replaces this project."
+            if opening
+            else "That workspace cannot be read."
+        )
+    elif named and parts[0] == "group":
+        said = f"{parts[3]}@{parts[2]}: press Add Map for a composite of its bands."
+    elif named:
+        said = f"{parts[3]}@{parts[2]}: press Add Map."
+    elif len(parts) > 2:
+        said = f"{'/'.join(parts[1:])}: choose a map or an imagery group in it."
+    else:
+        said = "Choose a project and a mapset."
+    items["status"] = {"text": said}
     items["data-add"] = {"enabled": named}
+    items["data-workspace"] = {"enabled": workspace}
     # Its whole answer is the database tree, which only this step draws, so a
     # Browse Mapset pressed from the ribbon has to bring the panel here.
     return {"panel": panel_answer(items, {"database": chosen}, "data")}
@@ -346,23 +367,219 @@ def add_folder(req):
     }
 
 
+def load_workspace(req):
+    """Open a GRASS workspace as this RustGIS project.
+
+    A ``.gxw`` names a GRASS project and mapset and the layers that were
+    displayed in it. Loading one replaces the RustGIS project with those
+    layers, puts the view in the GRASS project's own coordinate system and
+    frames the workspace's own extent.
+
+    **It replaces the project**, which is why it is a button and not what a
+    click in the tree does, and why a project with unsaved changes stops it:
+    losing someone's unsaved work to a mis-click in a tree is not a thing to
+    do quietly. ``{"discard": true}`` says to go ahead anyway.
+    """
+    values = panel_values(req)
+    params = req.get("params") or {}
+    chosen = params.get("workspace") or values.get("database")
+    path = database.parse_workspace_node(chosen)
+    workspace = database.read_workspace(path)
+    if not workspace:
+        raise session.GrassError(f"{path} is not a readable GRASS workspace")
+
+    # The workspace names the database it was written for; it is the one to
+    # read its maps from, not whichever database this machine defaults to.
+    base = workspace["database"] or database.gisdbase()
+    if not base or not os.path.isdir(os.path.join(base, workspace["project"])):
+        raise session.GrassError(
+            f"{path} names GRASS project <{workspace['project']}> in "
+            f"{workspace['database'] or 'no database'}, which is not there"
+        )
+    if not workspace["layers"]:
+        raise session.GrassError(
+            f"{path} has no raster or vector layer to load: its map display "
+            "holds none, or holds only ones RustGIS has no kind for"
+        )
+
+    open_now = call("info.project") or {}
+    if open_now.get("unsaved") and not params.get("discard"):
+        raise session.GrassError(
+            "this RustGIS project has unsaved changes, and loading a "
+            "workspace clears its layers; save it first, or pass "
+            '{"discard": true} to lose them'
+        )
+
+    opened_as = (
+        f"{os.path.basename(path)}: GRASS project {workspace['project']}, "
+        f"mapset {workspace['mapset']}, {len(workspace['layers'])} layer(s)."
+    )
+    messages = [opened_as]
+    if workspace["displays"] > 1:
+        messages.append(
+            f"The workspace has {workspace['displays']} map displays; the "
+            "first one's layers were loaded, because RustGIS has one map."
+        )
+    # `project.new` is reserved: RustGIS refuses every Effect::Replaces
+    # command to a plugin, because replacing someone's project is the user's
+    # own action. Clearing the layers is what a plugin may do, and it is what
+    # "clean from any previous project" means in practice; the project itself
+    # -- its name, its file, its layouts -- is left alone, and the messages
+    # say so rather than implying a new project was made.
+    standing = call("host.layers") or []
+    if standing:
+        call("layer.remove", {"layer": [layer.get("id") for layer in standing]})
+        messages.append(
+            f"{len(standing)} layer(s) already in this project were removed. "
+            "The project itself is not replaced: a plugin may not do that, "
+            "so its name and its file are unchanged."
+        )
+
+    loaded, failed = 0, []
+    with database.Export(progress=progress) as run:
+        epsg = run.crs(base, workspace["project"])
+        for layer in workspace["layers"]:
+            name, mapset, kind = layer["map"], layer["mapset"], layer["kind"]
+            target = raster.output_path(f"{workspace['project']}_{mapset}", name)
+            if kind == "vector":
+                target = target[: -len(".tif")] + ".gpkg"
+            progress(f"Loading {name}@{mapset}...")
+            try:
+                run.export(base, kind, workspace["project"], mapset, name, target)
+                added = call(
+                    "layer.addData", {"path": target, "name": f"{name}@{mapset}"}
+                )
+            except session.GrassError as e:
+                # One unreadable map is not a reason to abandon the rest of
+                # the workspace, but it is never passed over in silence.
+                failed.append(f"{name}@{mapset}: {e}")
+                continue
+            loaded += 1
+            if not layer["shown"] and isinstance(added, dict):
+                # The workspace had it unchecked; it is loaded but not drawn,
+                # so the project matches what GRASS was showing.
+                call(
+                    "layer.visibility",
+                    {"layer": added.get("layer"), "visible": False},
+                )
+
+    if not loaded:
+        raise session.GrassError(
+            f"none of {len(workspace['layers'])} layer(s) could be loaded: "
+            + "; ".join(failed)
+        )
+    messages.append(f"{loaded} layer(s) loaded from {workspace['project']}.")
+    for text in failed:
+        messages.append(f"Not loaded - {text}")
+    messages += harmonise_projection(epsg, workspace["project"], False)
+    messages += frame_workspace(base, workspace)
+
+    for text in messages:
+        log(text)
+    call("host.notify", {"text": messages[0]})
+    return {
+        "messages": messages,
+        "panel": panel_answer(
+            {
+                **database_panel(chosen),
+                "status": {"text": f"{workspace['project']}: {loaded} layer(s)."},
+            },
+            None,
+            "data",
+        ),
+    }
+
+
+def frame_workspace(base, workspace):
+    """Zoom the view to the workspace's own display extent.
+
+    The extent is in the GRASS project's coordinate system and
+    ``map.zoomToExtent`` takes degrees, so it is projected with ``m.proj``.
+    A failure here is not worth failing a load that worked: the layers are
+    there, and the view can be moved by hand.
+
+    :return: ``[message, ...]``
+    """
+    extent = workspace.get("extent")
+    if not extent:
+        return ["The workspace names no display extent, so the view was left."]
+    try:
+        with session.Run(progress=progress) as run:
+            degrees = run.to_degrees(os.path.join(base, workspace["project"]), extent)
+        call("map.zoomToExtent", {"extent": degrees})
+    except session.GrassError as e:
+        return [f"The view was not framed on the workspace's extent ({e})."]
+    west, south, east, north = degrees
+    framed = (
+        f"The view is framed on the workspace's own extent "
+        f"({west:.5f}, {south:.5f} to {east:.5f}, {north:.5f})."
+    )
+    return [framed]
+
+
+def compose_group(base, project, mapset, name, target):
+    """Draw one imagery group as a single picture, and say what was drawn.
+
+    A group's bands are meant to be seen together, so the group is composed
+    by the display module that fits it -- ``d.rgb`` for three bands or more,
+    ``d.his`` for two -- and imported back as one RGB layer, rather than
+    being added as a stack of grey rasters the user then has to compose.
+
+    The result is a **picture** of the bands, not the band values: it is for
+    looking at, not for running analysis on, and the messages say so.
+
+    :return: ``([message, ...], epsg)``
+    """
+    members = database.group_members(base, project, mapset, name)
+    module, args, bands, notes = raster.group_display(members, mapset)
+    with session.DisplayRun(progress=progress) as run:
+        messages = run.render_mapset(
+            base, project, mapset, module, args, bands, [], target
+        )
+        epsg = run.crs(base, project)
+    return messages + notes + [NOT_DATA], epsg
+
+
 def add_map(req):
     """Export the map chosen in the tree and add it to the project."""
     values = panel_values(req)
     base = database.gisdbase()
     if not base:
         raise session.GrassError("no GRASS database was found")
-    kind, project, mapset, name = database.parse_node(values.get("database"))
+    # As with run-module, RustGIS keeps a tree's value only while the node is
+    # among the ones it was last sent, so a script that has not browsed the
+    # tree cannot set it. Naming the map in the command's own parameters is
+    # the way in for the command line, for Python and for scripts.
+    asked = (req.get("params") or {}).get("map")
+    kind, project, mapset, name = database.parse_node(asked or values.get("database"))
     # A raster goes out as a GeoTIFF and a vector as a GeoPackage, which both
     # carry the coordinate system RustGIS then reads them in.
     target = raster.output_path(f"{project}_{mapset}", name)
     if kind == "vector":
         target = target[: -len(".tif")] + ".gpkg"
 
-    with database.Export(progress=progress) as run:
-        messages = run.export(base, kind, project, mapset, name, target)
+    # Read before the map is added, so "the only layer in the view" means
+    # what it says when the view's projection is decided below.
+    other_layers = bool(call("host.layers"))
+    if kind == "group":
+        messages, epsg = compose_group(base, project, mapset, name, target)
+    else:
+        with database.Export(progress=progress) as run:
+            messages = run.export(base, kind, project, mapset, name, target)
+            epsg = run.crs(base, project)
 
+    if not epsg:
+        # RustGIS reads a layer's coordinate system from the file and refuses
+        # one it cannot recognise ("the file's coordinate system isn't
+        # recognised"). An XY project has none to write, so say which project
+        # is the reason rather than leaving that message to stand alone.
+        raise session.GrassError(
+            f"{name}@{mapset} cannot be placed on the map: GRASS project "
+            f"{project} has no coordinate system (an XY project), so the "
+            "export carries none and RustGIS has nothing to place it by"
+        )
     added = call("layer.addData", {"path": target, "name": f"{name}@{mapset}"})
+    messages += harmonise_projection(epsg, project, other_layers)
     messages.append(f"The export is kept at {target}.")
     for text in messages:
         log(text)
@@ -377,6 +594,61 @@ def add_map(req):
             }
         ),
     }
+
+
+def harmonise_projection(epsg, project, other_layers):
+    """Put the view in the GRASS project's own coordinate system.
+
+    RustGIS reads the coordinate system from the file the plugin exports and
+    reprojects a layer for display, so a map always lands in the right place.
+    What it does not do is adopt that system as the view's own: a map from a
+    projected GRASS project is drawn in whatever world projection the view
+    happens to be in, which is not the system the user's GRASS work is in.
+    This is the same step the QGIS import makes (``crates/engine/src/cmd/qgis.rs``),
+    for the same reason.
+
+    The view is only changed when changing it cannot move someone else's data
+    under them: either the view is still in a world projection (the code is
+    not an EPSG one), or this map is the only thing in it. A view already in
+    another EPSG system is left alone and said to be left alone, because that
+    system was chosen -- by the user, or by the last GRASS map loaded -- and
+    the layers in it are drawn there.
+
+    :param epsg: the project's system as :meth:`database.Export.crs` reads it,
+        or None when it names none
+    :param project: the GRASS project's name, for the message
+    :param other_layers: whether the view holds any layer but the new one
+    :return: ``[message, ...]``
+    """
+    view = call("host.view") or {}
+    now = str(view.get("projection") or "")
+    if not epsg:
+        said = (
+            f"The view's projection was left as it is: GRASS project {project} "
+            "names no EPSG code for its coordinate system."
+        )
+        return [said]
+    if now.upper() == epsg.upper():
+        return [f"The view is already in {epsg}, the coordinate system of {project}."]
+    if now.upper().startswith("EPSG:") and other_layers:
+        said = (
+            f"The view was left in {now}: {project} is in {epsg}, but the view "
+            "already holds layers drawn in its own system. The map is "
+            "reprojected for display, so it is in the right place."
+        )
+        return [said]
+    try:
+        call("map.projection", {"type": epsg})
+    except session.GrassError as e:
+        # An unsupported system is not a reason to fail the load: the layer is
+        # there and reprojected for display, so say what was not done.
+        said = (
+            f"The view stays in {now}: it cannot be put in {epsg}, the "
+            f"coordinate system of {project} ({e}). The map is reprojected "
+            "for display, so it is in the right place."
+        )
+        return [said]
+    return [f"The view is now in {epsg}, the coordinate system of {project}."]
 
 
 def export_source(name, values, tag=""):
@@ -395,9 +667,7 @@ def export_source(name, values, tag=""):
     info = call("raster.info", {"layer": name}) or {}
     raster.check_source(info, name)
     band, band_note = raster.choose_band(info, values)
-    exported = os.path.join(
-        raster.output_dir(), f".export-{os.getpid()}{tag}.tif"
-    )
+    exported = os.path.join(raster.output_dir(), f".export-{os.getpid()}{tag}.tif")
     progress(f"Exporting {name}...")
     params = {"layer": name, "path": exported}
     if band:
@@ -416,9 +686,7 @@ def export_vector(name, tag=""):
     :param tag: a suffix keeping several exports of one run apart
     :return: ``(path, [note, ...])``
     """
-    target = os.path.join(
-        raster.output_dir(), f".export-{os.getpid()}{tag}.geojson"
-    )
+    target = os.path.join(raster.output_dir(), f".export-{os.getpid()}{tag}.geojson")
     try:
         os.remove(target)
     except OSError:
@@ -463,8 +731,7 @@ def run_display_module(catalogue, entry, values):
         )
 
     imported = {
-        port["name"]: [f"{name}@{mapset}" for name in port["maps"]]
-        for port in ports
+        port["name"]: [f"{name}@{mapset}" for name in port["maps"]] for port in ports
     }
     rasters, vectors = [], []
     for port in ports:
@@ -536,7 +803,7 @@ def run_module_in_mapset(catalogue, entry, values):
             "mapset it should write to under Projects and mapsets."
         )
     project, mapset = target
-    maps = database.maps(base, project, mapset)
+    maps = mapset_contents(base, project, mapset, entry)
     ports = raster.mapset_plan(entry, values, maps, mapset)
     form = values.get("form") or {}
     missing = raster.missing_form_values(entry, form)
@@ -547,9 +814,7 @@ def run_module_in_mapset(catalogue, entry, values):
     imported = {port["name"]: port["maps"] for port in ports}
     args = raster.mapset_args(entry, form, imported)
     with session.Run(progress=progress) as run:
-        messages = run.mapset_module(
-            base, project, mapset, entry["module"], args
-        )
+        messages = run.mapset_module(base, project, mapset, entry["module"], args)
     for text in messages:
         log(text)
     call("host.notify", {"text": f"{entry['module']}: {messages[0]}"})
@@ -904,10 +1169,7 @@ def panel_state(req, family=None, step=None):
     render_maps, render_mapset, render_project = [], "", ""
     needs_maps = bool(
         chosen_module
-        and (
-            chosen_module.get("render_runnable")
-            or chosen_module.get("mapset_inputs")
-        )
+        and (chosen_module.get("render_runnable") or chosen_module.get("mapset_inputs"))
     )
     if needs_maps:
         base = database.gisdbase()
@@ -916,9 +1178,7 @@ def panel_state(req, family=None, step=None):
             render_project, render_mapset = target
             render_maps = database.maps(base, render_project, render_mapset)
         if not base:
-            status += (
-                " No GRASS database was found; this module works on maps in one."
-            )
+            status += " No GRASS database was found; this module works on maps in one."
         elif not target:
             status += (
                 " Choose a project and mapset under Projects and mapsets; this "
@@ -928,7 +1188,9 @@ def panel_state(req, family=None, step=None):
             status += f" {render_project}/{render_mapset} has no maps to draw on."
     if not nodes and not (
         chosen_module
-        and (chosen_module.get("mapset_runnable") or chosen_module.get("render_runnable"))
+        and (
+            chosen_module.get("mapset_runnable") or chosen_module.get("render_runnable")
+        )
     ):
         status += " The map has no raster layer."
     items = {
@@ -979,6 +1241,30 @@ def can_run(entry):
     )
 
 
+def mapset_contents(base, project, mapset, entry):
+    """Return what a module's form may choose from in one mapset.
+
+    The maps are read from the file system, which is free. A space-time
+    dataset is not a folder but a row in the mapset's temporal database, so
+    listing those costs a GRASS run -- and it is only made when the module
+    actually names one, which few do.
+
+    :return: ``[(kind, name), ...]``, datasets alongside the maps
+    """
+    found = list(database.maps(base, project, mapset))
+    wanted = {
+        port.get("kind")
+        for port in (entry or {}).get("mapset_inputs") or []
+        if port.get("kind") in interface.TEMPORAL_ELEMENTS
+    }
+    for kind in sorted(wanted):
+        with database.Export(progress=progress) as run:
+            found += [
+                (kind, name) for name in run.datasets(base, project, mapset, kind)
+            ]
+    return found
+
+
 def module_form(entry, maps=(), mapset=""):
     """Return the form fields of the chosen module, whatever kind it is."""
     if not entry:
@@ -1011,14 +1297,10 @@ def layer_pick(req):
     notes = raster.source_notes(info)
     items = {
         "raster": {"nodes": nodes},
-        "source": {
-            "text": "\n".join([label] + notes) if label else "No raster chosen"
-        },
+        "source": {"text": "\n".join([label] + notes) if label else "No raster chosen"},
         "band": raster.band_slider(info),
         "region": {"text": describe_region(env)},
-        "status": {
-            "text": f"{label}: ready to run." if label else "No raster chosen."
-        },
+        "status": {"text": f"{label}: ready to run." if label else "No raster chosen."},
     }
     values = {"raster": chosen} if label else {}
     return {"panel": panel_answer(items, values)}
@@ -1039,14 +1321,16 @@ def module_pick(req):
         target = database.chosen_mapset(base, values.get("database")) if base else None
         if target:
             mapset = target[1]
-            maps = database.maps(base, *target)
-    status = (
-        f"{entry['module']}: press Run Module."
-        if entry and entry.get("runnable")
-        else f"{entry['module']}: {entry.get('reason') or 'see Chosen module'}."
-        if entry
-        else "Choose a module in the tree."
-    )
+            maps = mapset_contents(base, *target, entry)
+    # A module that runs in a mapset or draws a picture is runnable, and its
+    # raster-path reason ("takes no raster") describes a path it was never on:
+    # saying that about a module Run Module will happily run is wrong.
+    if not entry:
+        status = "Choose a module in the tree."
+    elif can_run(entry):
+        status = f"{entry['module']}: press Run Module."
+    else:
+        status = f"{entry['module']}: {entry.get('reason') or 'see Chosen module'}."
     return {
         "panel": panel_answer(
             {
@@ -1089,6 +1373,8 @@ def run_command(req):
         return add_folder(req)
     if command == "data-add":
         return add_map(req)
+    if command == "data-workspace":
+        return load_workspace(req)
     if command == "region-view":
         return set_region(req, "view")
     if command == "region-full":

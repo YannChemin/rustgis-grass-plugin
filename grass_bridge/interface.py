@@ -220,8 +220,6 @@ def _needs_text(names):
     return f"needs {shown}" + ("..." if len(names) > 3 else "")
 
 
-
-
 def _offerable(task):
     """Return the parameter and flag names a form can offer for a module."""
     names, seen = set(), set()
@@ -248,7 +246,10 @@ def _cannot_name(param):
         return "an output name, which the form cannot name"
     element = _prompt(prompt)
     if element in TEMPORAL_ELEMENTS:
-        return "a space-time dataset, which the form cannot name"
+        # Only reached for a dataset the form cannot fill from the chosen
+        # mapset (a module of a family that does not run there); one it can
+        # is offered as a choice, like a map.
+        return "a space-time dataset, which the form cannot offer"
     if element in ("raster", "cell", "raster_3d", "grid3"):
         return "a raster, which the form cannot name"
     if element == "vector":
@@ -271,6 +272,13 @@ def _mapset_inputs(task):
         element = _prompt(prompt)
         if element in ("raster", "cell", "vector"):
             kind = "vector" if element == "vector" else "raster"
+        elif element in ("raster_3d", "grid3"):
+            kind = "raster_3d"
+        elif element in TEMPORAL_ELEMENTS:
+            # A space-time dataset is named like a map and lives in the
+            # mapset's temporal database, so it is offered the same way: the
+            # datasets of the chosen mapset, listed by t.list.
+            kind = element
         else:
             continue
         inputs.append(
@@ -331,12 +339,20 @@ def _mapset_runnability(task):
         if pname in offered or _text(param.find("default")):
             continue
         element = _layer_element(param)
-        if pname in fillable and element in ("raster", "cell", "vector"):
+        if pname in fillable and element in LAYER_ELEMENTS | TEMPORAL_ELEMENTS:
             continue
         if element in ("raster_3d", "grid3"):
-            missing.append("a 3D raster, which the form cannot name")
+            # Only an existing 3D raster can be offered. One the module writes
+            # is an output name like any other, and must be reported as one:
+            # "needs a 3D raster" sent the reader hunting for a map that does
+            # not exist yet.
+            missing.append(
+                _cannot_name(param) or "a 3D raster, which the form cannot offer"
+            )
             continue
-        missing.append(_cannot_name(param) or (f"'{pname}'" if pname else "a parameter"))
+        missing.append(
+            _cannot_name(param) or (f"'{pname}'" if pname else "a parameter")
+        )
     for flag in task.findall("flag"):
         if flag.get("required") != "yes":
             continue
@@ -353,13 +369,18 @@ def _mapset_runnability(task):
     return out
 
 
+#: The elements a parameter may name that the form can fill from the chosen
+#: mapset: its maps, and its space-time datasets.
+LAYER_ELEMENTS = frozenset({"raster", "cell", "raster_3d", "grid3", "vector"})
+
+
 def _layer_element(param):
-    """Return a parameter's layer element (raster, cell, grid3, vector), or ""."""
+    """Return a parameter's element (raster, grid3, vector, strds...), or ""."""
     prompt = param.find("gisprompt")
     if prompt is None:
         return ""
     element = _prompt(prompt)
-    return element if element in ("raster", "cell", "raster_3d", "grid3", "vector") else ""
+    return element if element in LAYER_ELEMENTS | TEMPORAL_ELEMENTS else ""
 
 
 def _render_runnability(task):
@@ -426,7 +447,10 @@ def _render_runnability(task):
     if not inputs:
         out["render_reason"] = "draws on a display, not into a layer"
         return out
-    if not any(port["required"] for port in inputs) and name not in RENDER_OPTIONAL_INPUT:
+    if (
+        not any(port["required"] for port in inputs)
+        and name not in RENDER_OPTIONAL_INPUT
+    ):
         out["render_reason"] = "draws on a display, not into a layer"
         return out
     if name in RENDER_OPTIONAL_INPUT:
@@ -713,7 +737,11 @@ def parse(xml_text):
     """
     task, module, label, params, skipped = _specs(xml_text)
     params = [
-        {k: p[k] for k in ("name", "label", "kind", "required", "default", "choices") if k in p}
+        {
+            k: p[k]
+            for k in ("name", "label", "kind", "required", "default", "choices")
+            if k in p
+        }
         for p in params
     ]
     if len(params) > MAX_PARAMS:
@@ -767,7 +795,9 @@ def form_fields(xml_text):
             "kind": kind,
             "label": _clip(label, 200),
         }
-        help_text = spec.get("help") or (spec["label"] if label != spec["label"] else "")
+        help_text = spec.get("help") or (
+            spec["label"] if label != spec["label"] else ""
+        )
         if help_text:
             field["help"] = _clip(help_text, 2000)
         if spec.get("required"):
@@ -780,7 +810,9 @@ def form_fields(xml_text):
         if default is not None and kind != "checkbox":
             if kind == "multi":
                 parts = default.split(",") if isinstance(default, str) else default
-                picked = [str(p).strip() for p in parts if str(p).strip() in spec["choices"]]
+                picked = [
+                    str(p).strip() for p in parts if str(p).strip() in spec["choices"]
+                ]
                 if picked:
                     field["default"] = picked
             elif kind in ("number", "text") or (

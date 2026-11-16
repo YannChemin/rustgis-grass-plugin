@@ -129,7 +129,9 @@ def test_form_fields_leave_out_what_the_panel_names():
     by = {f["id"]: f for f in fields}
     assert "input" not in by and "output" not in by
     assert "elevation" not in by and "rmsfile" not in by and "table" not in by
-    assert by["helper"]["kind"] == "text", "a vector layer the form cannot pass is typed"
+    assert by["helper"]["kind"] == "text", (
+        "a vector layer the form cannot pass is typed"
+    )
     assert by["rules"]["kind"] == "text"
     assert by["label"]["kind"] == "text"
     assert by["distance"]["kind"] == "number"
@@ -615,14 +617,39 @@ def test_a_display_module_that_writes_a_map_is_not_a_picture():
     assert entry["reason"] == "writes a map, not a picture"
 
 
-def test_a_temporal_module_needing_a_dataset_says_the_form_cannot_name_it():
+def test_a_temporal_module_takes_a_dataset_of_the_chosen_mapset():
+    # A space-time dataset is named like a map and lives in the mapset, so the
+    # form offers the mapset's datasets rather than refusing the module. The
+    # gisprompt is the only thing that says so: GRASS declares it type="string"
+    # and --help shows nothing to distinguish it from any other name.
     extra = """<parameter name="input" type="string" required="yes">
       <description>Input space-time dataset</description>
       <gisprompt age="old" element="strds" prompt="strds" />
     </parameter>"""
     entry = interface.describe(temporal_task(extra))
+    assert entry["mapset_runnable"] is True
+    assert entry["mapset_reason"] == ""
+    assert [(p["name"], p["kind"], p["required"]) for p in entry["mapset_inputs"]] == [
+        ("input", "strds", True)
+    ]
+
+
+def test_a_dataset_module_that_also_names_its_output_is_still_refused():
+    # t.rast.series' shape: an old strds in, a new raster out. The dataset is
+    # offerable now; naming what it writes into the user's own mapset is not,
+    # until the bridge can promise not to overwrite.
+    extra = """<parameter name="input" type="string" required="yes">
+      <description>Input space-time dataset</description>
+      <gisprompt age="old" element="strds" prompt="strds" />
+    </parameter>
+    <parameter name="output" type="string" required="yes">
+      <description>Name for output raster map</description>
+      <gisprompt age="new" element="cell" prompt="raster" />
+    </parameter>"""
+    entry = interface.describe(temporal_task(extra))
     assert entry["mapset_runnable"] is False
-    assert "space-time dataset" in entry["mapset_reason"]
+    assert "output name" in entry["mapset_reason"]
+    assert "space-time" not in entry["mapset_reason"]
 
 
 def test_an_in_place_raster_module_takes_maps_of_the_chosen_mapset():
@@ -797,15 +824,18 @@ def test_choosing_a_mapset_refreshes_a_display_modules_maps(monkeypatch, tmp_pat
         "reason": "renders a picture",
         "render_runnable": True,
         "render_inputs": [
-            {"name": name, "kind": "raster", "label": name, "required": True,
-             "multiple": False}
+            {
+                "name": name,
+                "kind": "raster",
+                "label": name,
+                "required": True,
+                "multiple": False,
+            }
             for name in ("red", "green", "blue")
         ],
         "form": [],
     }
-    monkeypatch.setattr(
-        main, "load_catalogue", lambda: {"catalogue": [display]}
-    )
+    monkeypatch.setattr(main, "load_catalogue", lambda: {"catalogue": [display]})
     answer = main.browse_database(
         {
             "panel": {
@@ -935,12 +965,16 @@ def test_the_panel_runs_an_in_place_module_on_a_map_of_the_mapset(
         "mapset_runnable": True,
         "mapset_reason": "",
         "mapset_inputs": [
-            {"name": "map", "kind": "raster", "label": "Map", "help": "",
-             "required": False, "multiple": True}
+            {
+                "name": "map",
+                "kind": "raster",
+                "label": "Map",
+                "help": "",
+                "required": False,
+                "multiple": True,
+            }
         ],
-        "form": [
-            {"id": "color", "kind": "select", "choices": ["grey", "elevation"]}
-        ],
+        "form": [{"id": "color", "kind": "select", "choices": ["grey", "elevation"]}],
     }
     answer = main.run_module_in_mapset(
         [entry],
@@ -1115,9 +1149,7 @@ def test_a_step_draws_its_own_widgets_and_hides_the_others():
 
     for step, _ in panel.STEPS:
         shown = {
-            name
-            for name, state in panel.visibility(step).items()
-            if state["visible"]
+            name for name, state in panel.visibility(step).items() if state["visible"]
         }
         assert shown == set(panel.ALWAYS) | set(panel.STEP_ITEMS[step])
         # The panel's whole point is that a step is a screenful, not a column.
@@ -1196,9 +1228,7 @@ def test_choosing_a_module_answers_the_details_and_the_form_only(monkeypatch):
     monkeypatch.setattr(
         main, "call", lambda op, params=None: pytest.fail(f"host request {op}")
     )
-    answer = main.module_pick(
-        {"panel": {"values": {"modules": "runs/r.slope.aspect"}}}
-    )
+    answer = main.module_pick({"panel": {"values": {"modules": "runs/r.slope.aspect"}}})
     items = answer["panel"]["items"]
     assert set(items) == {"details", "form", "status", "run-module"}
     assert items["form"]["fields"] == [{"id": "zscale", "kind": "text"}]
@@ -1297,7 +1327,11 @@ def test_a_picked_viewpoint_is_read_as_degrees():
 def test_a_picked_box_becomes_an_extent_and_a_wrapped_one_is_refused():
     import main
 
-    place = {"bbox": [-2.0, 47.0, -1.0, 48.0], "extent": [1, 2, 3, 4], "crs": "EPSG:3857"}
+    place = {
+        "bbox": [-2.0, 47.0, -1.0, 48.0],
+        "extent": [1, 2, 3, 4],
+        "crs": "EPSG:3857",
+    }
     assert main.picked_box({"region-box": place}) == [-2.0, 47.0, -1.0, 48.0]
     assert main.picked_box({}) is None
     assert main.picked_box({"region-box": {"bbox": [1, 2]}}) is None
@@ -1338,3 +1372,164 @@ def test_the_region_box_command_says_when_no_box_was_drawn(monkeypatch):
     with pytest.raises(main.session.GrassError) as raised:
         main.run_command({"id": "region-box", "panel": {"values": {}}})
     assert "no box has been drawn" in str(raised.value)
+
+
+def harmonise(monkeypatch, projection, epsg, other_layers=False):
+    """Run ``harmonise_projection`` against a view in ``projection``.
+
+    :return: ``(messages, [(op, params), ...])``
+    """
+    import main
+
+    seen = []
+
+    def fake_call(op, params=None):
+        seen.append((op, params))
+        return {"projection": projection} if op == "host.view" else {}
+
+    monkeypatch.setattr(main, "call", fake_call)
+    said = main.harmonise_projection(epsg, "utmproj", other_layers)
+    return said, seen
+
+
+def test_a_world_projection_is_replaced_by_the_grass_project_s_own(monkeypatch):
+    # A map from a projected GRASS project drawn in a world projection is in
+    # the right place but not in the system the user's GRASS work is in.
+    for world in ("globe", "mercator", "robinson"):
+        said, seen = harmonise(monkeypatch, world, "EPSG:32630")
+        assert ("map.projection", {"type": "EPSG:32630"}) in seen
+        assert "now in EPSG:32630" in said[0]
+
+
+def test_a_view_already_in_the_system_is_left_alone(monkeypatch):
+    said, seen = harmonise(monkeypatch, "EPSG:32630", "EPSG:32630")
+    assert not any(op == "map.projection" for op, _ in seen)
+    assert "already in EPSG:32630" in said[0]
+
+
+def test_a_view_in_another_system_with_layers_in_it_is_not_flipped(monkeypatch):
+    # Changing it would move someone else's data under them, and RustGIS
+    # reprojects for display anyway, so the map is still in the right place.
+    said, seen = harmonise(monkeypatch, "EPSG:32631", "EPSG:32630", other_layers=True)
+    assert not any(op == "map.projection" for op, _ in seen)
+    assert "left in EPSG:32631" in said[0]
+    assert "right place" in said[0]
+
+
+def test_a_view_in_another_system_with_nothing_in_it_is_harmonised(monkeypatch):
+    said, seen = harmonise(monkeypatch, "EPSG:32631", "EPSG:32630", other_layers=False)
+    assert ("map.projection", {"type": "EPSG:32630"}) in seen
+    assert "now in EPSG:32630" in said[0]
+
+
+def test_a_projection_rustgis_refuses_does_not_fail_the_load(monkeypatch):
+    import main
+
+    def fake_call(op, params=None):
+        if op == "host.view":
+            return {"projection": "globe"}
+        raise main.session.GrassError("no such projection")
+
+    monkeypatch.setattr(main, "call", fake_call)
+    said = main.harmonise_projection("EPSG:99999", "utmproj", False)
+    assert "stays in globe" in said[0] and "no such projection" in said[0]
+    assert "right place" in said[0]
+
+
+def test_a_project_with_no_epsg_code_leaves_the_view_as_it_is(monkeypatch):
+    said, seen = harmonise(monkeypatch, "globe", None)
+    assert not any(op == "map.projection" for op, _ in seen)
+    assert "names no EPSG code" in said[0]
+
+
+def test_a_group_node_is_offered_above_the_loose_rasters(tmp_path):
+    from grass_bridge import database
+
+    mapset = tmp_path / "utm" / "PERMANENT"
+    (mapset / "cellhd").mkdir(parents=True)
+    for name in ("red", "green", "blue"):
+        (mapset / "cellhd" / name).write_text("")
+    (mapset / "WIND").write_text("")
+    (tmp_path / "utm" / "PERMANENT" / "group" / "scene").mkdir(parents=True)
+    (mapset / "group" / "scene" / "REF").write_text(
+        "red PERMANENT\ngreen PERMANENT\nblue PERMANENT\n"
+    )
+    (mapset / "group" / "one").mkdir(parents=True)
+    (mapset / "group" / "one" / "REF").write_text("red PERMANENT\n")
+
+    nodes, _ = database.tree(str(tmp_path), ("utm", "PERMANENT"), home="")
+    labels = [child["label"] for child in nodes[0]["children"][0]["children"]]
+    # The composite comes before the parts it is made of.
+    assert labels[0] == "one (group of 1, not a composite)"
+    assert labels[1] == "scene (group of 3)"
+    assert labels[2:] == ["blue (raster)", "green (raster)", "red (raster)"]
+    assert nodes[0]["children"][0]["children"][1]["id"] == ("group/utm/PERMANENT/scene")
+
+
+def test_a_group_node_enables_add_map_and_says_what_it_will_do(monkeypatch):
+    import main
+
+    monkeypatch.setattr(main, "call", lambda op, params=None: {})
+    monkeypatch.setattr(main, "database_panel", lambda chosen=None: {})
+    monkeypatch.setattr(main, "load_catalogue", lambda: {"catalogue": []})
+    answer = main.run_command(
+        {
+            "id": "data-browse",
+            "panel": {"values": {"database": "group/utm/PERMANENT/scene"}},
+        }
+    )
+    items = answer["panel"]["items"]
+    assert items["data-add"]["enabled"] is True
+    assert "composite of its bands" in items["status"]["text"]
+
+
+def test_a_mapset_module_is_not_told_it_takes_no_raster(monkeypatch):
+    import main
+
+    # "takes no raster" is the raster path's reason, and a temporal module was
+    # never on that path: the panel used to show it for a module Run Module
+    # runs perfectly well.
+    entry = {
+        "module": "t.rast.list",
+        "runnable": False,
+        "mapset_runnable": True,
+        "render_runnable": False,
+        "reason": "takes no raster",
+        "mapset_inputs": [],
+        "form": [],
+    }
+    monkeypatch.setattr(main, "call", lambda op, params=None: {})
+    monkeypatch.setattr(main, "load_catalogue", lambda: {"catalogue": [entry]})
+    monkeypatch.setattr(main, "database_panel", lambda chosen=None: {})
+    monkeypatch.setattr(main.database, "gisdbase", lambda: None)
+    answer = main.run_command(
+        {"id": "module-pick", "panel": {"values": {"modules": "runs/t.rast.list"}}}
+    )
+    items = answer["panel"]["items"]
+    assert items["status"]["text"] == "t.rast.list: press Run Module."
+    assert items["run-module"]["enabled"] is True
+
+
+def test_a_3d_raster_input_is_offered_from_the_mapset():
+    extra = """<parameter name="input" type="string" required="yes">
+      <description>Name of the 3D raster</description>
+      <gisprompt age="old" element="grid3" prompt="raster_3d" />
+    </parameter>"""
+    entry = interface.describe(temporal_task(extra))
+    assert entry["mapset_runnable"] is True
+    assert [(p["name"], p["kind"]) for p in entry["mapset_inputs"]] == [
+        ("input", "raster_3d")
+    ]
+
+
+def test_a_3d_raster_output_is_reported_as_an_output_name():
+    # The old rule hit the grid3 branch before it looked at the age, so
+    # t.rast.to.rast3 was told it "needs a 3D raster" -- sending the reader to
+    # look for a map that does not exist yet. It needs a name for one.
+    extra = """<parameter name="output" type="string" required="yes">
+      <description>Name of the output 3D raster</description>
+      <gisprompt age="new" element="grid3" prompt="raster_3d" />
+    </parameter>"""
+    entry = interface.describe(temporal_task(extra))
+    assert entry["mapset_runnable"] is False
+    assert entry["mapset_reason"] == "needs an output name, which the form cannot name"

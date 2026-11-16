@@ -297,10 +297,10 @@ def test_a_mapset_lists_its_maps_only_when_it_is_the_one_opened(tmp_path):
     base = fake_database(
         tmp_path, {"site": {"PERMANENT": [("raster", "dem"), ("raster", "slope")]}}
     )
-    closed, _ = database.tree(base)
+    closed, _ = database.tree(base, home="")
     assert closed[0]["count"] == 2
     assert "children" not in closed[0]["children"][0]
-    open_, _ = database.tree(base, ("site", "PERMANENT"))
+    open_, _ = database.tree(base, ("site", "PERMANENT"), home="")
     assert [c["label"] for c in open_[0]["children"][0]["children"]] == [
         "dem (raster)",
         "slope (raster)",
@@ -309,7 +309,7 @@ def test_a_mapset_lists_its_maps_only_when_it_is_the_one_opened(tmp_path):
 
 def test_an_empty_mapset_is_left_out(tmp_path):
     base = fake_database(tmp_path, {"site": {"PERMANENT": []}})
-    assert database.tree(base) == ([], [])
+    assert database.tree(base, home="") == ([], [])
 
 
 def test_the_settings_file_says_where_the_database_is(tmp_path, monkeypatch):
@@ -485,9 +485,7 @@ def test_the_module_tree_keeps_only_temporal_modules_in_its_mode():
     runs, every, recent = nodes
     assert runs["label"] == "Runs from here (0)"
     assert every["label"] == "All temporal modules (1)"
-    assert [n["id"] for n in every["children"][0]["children"]] == [
-        "all/t.rast.series"
-    ]
+    assert [n["id"] for n in every["children"][0]["children"]] == ["all/t.rast.series"]
     assert recent["children"] == []
 
 
@@ -599,15 +597,18 @@ def test_missing_form_values_names_only_what_has_no_default_or_value():
         "flag_c",
         "levels",
     ]
-    assert raster.missing_form_values(
-        entry,
-        {
-            "variables": ["t2m"],
-            "start": "2020-01-01",
-            "flag_c": True,
-            "levels": 3,
-        },
-    ) == []
+    assert (
+        raster.missing_form_values(
+            entry,
+            {
+                "variables": ["t2m"],
+                "start": "2020-01-01",
+                "flag_c": True,
+                "levels": 3,
+            },
+        )
+        == []
+    )
     assert raster.missing_form_values(
         entry,
         {
@@ -943,10 +944,7 @@ def test_a_display_module_gets_the_flag_its_picture_needs():
         "form": [{"id": "breaks", "kind": "text"}],
     }
     assert raster.render_args(thematic, {}, {}) == ["algorithm=int"]
-    assert (
-        raster.render_args(thematic, {"breaks": "10,20"}, {})
-        == ["breaks=10,20"]
-    )
+    assert raster.render_args(thematic, {"breaks": "10,20"}, {}) == ["breaks=10,20"]
 
 
 def test_a_render_module_is_in_runs_from_here_and_says_it_renders():
@@ -1015,3 +1013,277 @@ def test_a_run_that_runs_out_says_what_it_was_given():
         run.left()
     assert "3600 seconds" in str(raised.value)
     assert "timeout parameter" in str(raised.value)
+
+
+def test_a_project_s_crs_is_read_from_its_srid(monkeypatch):
+    # g.proj -g prints srid=EPSG:32630 for a project with a coordinate system
+    # and no srid at all for an XY one, so the EPSG code is read rather than
+    # rebuilt from the projection parameters.
+    import subprocess
+
+    out = {
+        "with": "name=WGS 84 / UTM zone 30N\nproj=utm\nzone=30\nsrid=EPSG:32630\nunit=meter\n",
+        "without": "name=xy_location_unprojected\n",
+    }
+    run = database.Export.__new__(database.Export)
+    run.grass = "grass"
+    run.deadline = None
+
+    for key, expected in (("with", "EPSG:32630"), ("without", None)):
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda *a, _text=out[key], **k: subprocess.CompletedProcess(
+                [], 0, _text, ""
+            ),
+        )
+        assert run.crs("/db", "project") == expected
+
+
+def test_a_crs_that_cannot_be_read_is_not_guessed_at(monkeypatch):
+    import subprocess
+
+    run = database.Export.__new__(database.Export)
+    run.grass = "grass"
+    run.deadline = None
+    # A failed g.proj, and one whose srid is not an EPSG code, both mean "not
+    # known" -- never a code invented from what else it printed.
+    for result in (
+        subprocess.CompletedProcess([], 1, "", "no such project"),
+        subprocess.CompletedProcess([], 0, "srid=IAU_2015:49900\n", ""),
+    ):
+        monkeypatch.setattr(subprocess, "run", lambda *a, _done=result, **k: _done)
+        assert run.crs("/db", "project") is None
+
+
+def test_a_group_s_bands_are_read_from_its_ref_in_band_order(tmp_path):
+    ref = tmp_path / "utm" / "PERMANENT" / "group" / "scene"
+    ref.mkdir(parents=True)
+    # REF is "<map> <mapset>" per line, in the band order i.group was given.
+    (ref / "REF").write_text("red PERMANENT\ngreen PERMANENT\nblue other\n")
+    found = database.groups(str(tmp_path), "utm", "PERMANENT")
+    assert found == [
+        ("scene", [("red", "PERMANENT"), ("green", "PERMANENT"), ("blue", "other")])
+    ]
+
+
+def test_a_group_with_no_readable_band_is_left_out_and_then_refused(tmp_path):
+    base = tmp_path / "utm" / "PERMANENT" / "group"
+    (base / "empty").mkdir(parents=True)
+    (base / "empty" / "REF").write_text("")
+    (base / "broken").mkdir(parents=True)
+    # A half-written line names no (map, mapset) pair, and guessing at it
+    # would put a wrong map in a composite.
+    (base / "broken" / "REF").write_text("just_a_name\n")
+    (base / "noref").mkdir(parents=True)
+    assert database.groups(str(tmp_path), "utm", "PERMANENT") == []
+    with pytest.raises(session.GrassError, match="no readable band"):
+        database.group_members(str(tmp_path), "utm", "PERMANENT", "empty")
+
+
+def test_three_bands_or_more_are_composed_with_d_rgb():
+    members = [("red", "PERMANENT"), ("green", "PERMANENT"), ("blue", "PERMANENT")]
+    module, args, bands, notes = raster.group_display(members, "PERMANENT")
+    assert module == "d.rgb"
+    assert args == [
+        "red=red@PERMANENT",
+        "green=green@PERMANENT",
+        "blue=blue@PERMANENT",
+    ]
+    assert bands == [f"{n}@PERMANENT" for n, _ in members]
+    assert "band order" in notes[0]
+
+
+def test_a_fourth_band_is_left_out_and_said_to_be():
+    members = [(n, "PERMANENT") for n in ("red", "green", "blue", "nir")]
+    module, _, bands, notes = raster.group_display(members, "PERMANENT")
+    assert module == "d.rgb" and len(bands) == 3
+    assert "4 bands" in notes[1] and "nir@PERMANENT" in notes[1]
+
+
+def test_two_bands_are_composed_with_d_his():
+    module, args, _, _ = raster.group_display(
+        [("ndvi", "PERMANENT"), ("shade", "PERMANENT")], "PERMANENT"
+    )
+    assert module == "d.his"
+    assert args == ["hue=ndvi@PERMANENT", "intensity=shade@PERMANENT"]
+
+
+def test_one_band_is_not_a_composite():
+    # Dropping to a single-band render would be a grey picture of a raster the
+    # user can simply add, so it is refused with that advice.
+    with pytest.raises(session.GrassError, match="add that band on its own"):
+        raster.group_display([("red", "PERMANENT")], "PERMANENT")
+
+
+def test_a_band_that_names_no_mapset_takes_the_group_s():
+    _, args, _, _ = raster.group_display([("a", ""), ("b", "elsewhere")], "PERMANENT")
+    assert args == ["hue=a@PERMANENT", "intensity=b@elsewhere"]
+
+
+GXW = """<?xml version="1.0" encoding="UTF-8"?>
+<gxw>
+    <session>
+        <database>{base}</database>
+        <location>IGN</location>
+        <mapset>PERMANENT</mapset>
+    </session>
+    <display name="Map Display 1" extent="1.0,2.0,3.0,4.0,0.000000,255.000000">
+        <layer type="raster" name="psri@PERMANENT" checked="0"/>
+        <layer type="vector" name="study_areas@other" checked="1"/>
+        <layer type="raster" name="no_mapset" checked="1"/>
+        <layer type="3d-raster" name="cube@PERMANENT" checked="1"/>
+    </display>
+</gxw>
+"""
+
+
+def workspace_file(folder, text=GXW, name="default.gxw"):
+    """Write one .gxw and return its path."""
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / name
+    path.write_text(text.format(base=str(folder)))
+    return str(path)
+
+
+def test_a_workspace_names_its_project_layers_and_extent(tmp_path):
+    path = workspace_file(tmp_path / "IGN")
+    found = database.read_workspace(path)
+    assert found["project"] == "IGN" and found["mapset"] == "PERMANENT"
+    # The display's extent is four numbers of six: the last two are heights.
+    assert found["extent"] == [1.0, 2.0, 3.0, 4.0]
+    # A layer with no mapset in its name, and one of a kind RustGIS has no
+    # layer for, are both left out rather than guessed at.
+    assert [
+        (layer["map"], layer["mapset"], layer["shown"]) for layer in found["layers"]
+    ] == [
+        ("psri", "PERMANENT", False),
+        ("study_areas", "other", True),
+    ]
+
+
+def test_what_is_not_a_workspace_is_not_read(tmp_path):
+    folder = tmp_path / "x"
+    folder.mkdir()
+    for name, text in (
+        ("notxml.gxw", "this is not XML at all"),
+        ("other.gxw", "<?xml version='1.0'?><project><a/></project>"),
+        ("nosession.gxw", "<?xml version='1.0'?><gxw><display/></gxw>"),
+    ):
+        (folder / name).write_text(text)
+        assert database.read_workspace(str(folder / name)) is None
+    assert database.read_workspace(str(folder / "missing.gxw")) is None
+
+
+def test_a_workspace_too_big_to_be_one_is_passed_over(tmp_path, monkeypatch):
+    path = workspace_file(tmp_path / "IGN")
+    monkeypatch.setattr(database, "WORKSPACE_MAX_BYTES", 10)
+    assert database.read_workspace(path) is None
+
+
+def test_a_display_extent_with_no_area_is_not_used(tmp_path):
+    for extent in ("3,2,1,4,0,255", "1,2,1,4", "1,2", "", "a,b,c,d"):
+        assert database._display_extent(extent) is None
+    assert database._display_extent("1,2,3,4,0,255") == [1.0, 2.0, 3.0, 4.0]
+
+
+def test_a_workspace_node_survives_the_separator_in_its_path():
+    # The node id is built with the same separator a path uses, so the path
+    # is percent-encoded; without it a path would read as project/mapset.
+    path = "/home/someone/My Maps/grass/default.gxw"
+    node = database.workspace_node(path)
+    assert database.SEP not in node[len("workspace") + 1 :]
+    assert database.parse_workspace_node(node) == path
+    for wrong in ("raster/utm/PERMANENT/dem", "workspace", "", None):
+        with pytest.raises(session.GrassError):
+            database.parse_workspace_node(wrong)
+
+
+def test_the_scan_skips_mapsets_hidden_folders_and_caches(tmp_path):
+    # A mapset holds a database's maps -- tens of thousands of files -- and
+    # never a workspace, so it must not be listed.
+    home = tmp_path / "home"
+    workspace_file(home / "work")
+    mapset = home / "data" / "proj" / "PERMANENT"
+    mapset.mkdir(parents=True)
+    (mapset / "WIND").write_text("")
+    workspace_file(mapset / "deep")
+    workspace_file(home / ".cache" / "x")
+    workspace_file(home / "node_modules" / "y")
+    found = database.workspaces(base=None, home=str(home))
+    assert [path for path, _ in found] == [str(home / "work" / "default.gxw")]
+
+
+def test_the_database_is_listed_not_walked(tmp_path):
+    # GRASS writes a project's workspace beside it, so one listing finds it.
+    base = tmp_path / "grassdata"
+    workspace_file(base / "IGN")
+    mapset = base / "IGN" / "PERMANENT"
+    mapset.mkdir(parents=True)
+    (mapset / "WIND").write_text("")
+    found = database.workspaces(base=str(base), home=str(tmp_path / "empty"))
+    assert [path for path, _ in found] == [str(base / "IGN" / "default.gxw")]
+
+
+def test_a_dataset_field_offers_the_mapset_s_datasets():
+    entry = {
+        "module": "t.rast.list",
+        "mapset_inputs": [
+            {"name": "input", "kind": "strds", "label": "Input", "required": True}
+        ],
+        "form": [],
+    }
+    # The datasets travel beside the maps, as (kind, name) pairs.
+    maps = [
+        ("raster", "dem"),
+        ("strds", "s2_B04@PERMANENT"),
+        ("strds", "s1_vv@PERMANENT"),
+    ]
+    field = raster.mapset_form(entry, maps, "PERMANENT")[0]
+    assert field["id"] == "input" and field["kind"] == "select"
+    assert field["choices"] == ["s2_B04@PERMANENT", "s1_vv@PERMANENT"]
+
+
+def test_an_empty_dataset_field_says_dataset_not_map():
+    entry = {
+        "module": "t.rast.list",
+        "mapset_inputs": [
+            {"name": "input", "kind": "strds", "label": "Input", "required": True}
+        ],
+        "form": [],
+    }
+    field = raster.mapset_form(entry, [("raster", "dem")], "PERMANENT")[0]
+    assert field["choices"] == [
+        "(no space-time raster datasets in the PERMANENT mapset)"
+    ]
+    assert "space-time raster dataset" in field["help"]
+
+
+def test_a_dataset_that_is_not_in_the_mapset_is_refused_as_a_dataset():
+    entry = {
+        "module": "t.rast.list",
+        "mapset_inputs": [
+            {"name": "input", "kind": "strds", "label": "Input", "required": True}
+        ],
+        "form": [],
+    }
+    with pytest.raises(session.GrassError, match="space-time raster dataset"):
+        raster.mapset_plan(
+            entry,
+            {"form": {"input": "nope@PERMANENT"}},
+            [("strds", "a@PERMANENT")],
+            "PERMANENT",
+        )
+
+
+def test_a_mapset_s_3d_rasters_are_listed_beside_its_maps(tmp_path):
+    mapset = tmp_path / "proj" / "PERMANENT"
+    for folder, name in (("cellhd", "dem"), ("grid3", "cube"), ("vector", "roads")):
+        (mapset / folder).mkdir(parents=True, exist_ok=True)
+        if folder == "vector":
+            (mapset / folder / name).mkdir()
+        else:
+            (mapset / folder / name).write_text("")
+    found = database.maps(str(tmp_path), "proj", "PERMANENT")
+    assert ("raster_3d", "cube") in found
+    assert ("raster", "dem") in found and ("vector", "roads") in found

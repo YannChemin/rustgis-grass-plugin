@@ -274,6 +274,7 @@ def mode_family(mode):
     """Return the family a Catalogue option keeps, or None for every module."""
     return MODE_FAMILIES.get(str(mode or ""), None)
 
+
 #: How many modules the "Recently run" branch keeps.
 MAX_RECENT = 12
 
@@ -501,8 +502,7 @@ def module_details(entry):
         lines.append("Needs: " + ", ".join(entry["needs"]))
     if entry.get("temporal"):
         lines.append(
-            "This is a temporal module: it reads a space-time dataset, not one "
-            "raster."
+            "This is a temporal module: it reads a space-time dataset, not one raster."
         )
     if entry.get("keywords"):
         lines.append("Keywords: " + entry["keywords"])
@@ -705,6 +705,27 @@ def _with_form(values):
     return values
 
 
+#: How each element a form field can offer is named to the user. A space-time
+#: dataset is not a map, and saying "no strds maps in the mapset" would be
+#: wrong twice over.
+KIND_WORDS = {
+    "raster": "raster map",
+    "vector": "vector map",
+    "raster_3d": "3D raster map",
+    "grid3": "3D raster map",
+    "strds": "space-time raster dataset",
+    "str3ds": "space-time 3D raster dataset",
+    "stvds": "space-time vector dataset",
+    "stds": "space-time dataset",
+}
+
+
+def kind_word(kind, plural=False):
+    """Return the words for one element kind, as the user should read them."""
+    word = KIND_WORDS.get(kind, f"{kind} map")
+    return word + "s" if plural else word
+
+
 def _map_fields(inputs, maps, mapset=None):
     """Return one form field for each map a module reads.
 
@@ -722,7 +743,7 @@ def _map_fields(inputs, maps, mapset=None):
         if not choices:
             # Keep the field visible when the mapset has no map of that kind:
             # hiding it leaves only the flags and no clue why they are alone.
-            missing = f"(no {kind} maps in {where})"
+            missing = f"(no {kind_word(kind, True)} in {where})"
             if port.get("multiple"):
                 field = {
                     "id": port["name"],
@@ -741,7 +762,7 @@ def _map_fields(inputs, maps, mapset=None):
                 field["required"] = True
             field["help"] = (
                 (help_text + " " if help_text else "")
-                + f"Choose a {kind} map from the mapset selected under "
+                + f"Choose a {kind_word(kind)} from the mapset selected under "
                 "Projects and mapsets."
             )[:2000]
             fields.append(field)
@@ -801,9 +822,7 @@ def render_form(entry, maps, mapset=None):
     :param mapset: the chosen mapset's name, for a missing-kind message
     :return: the fields the panel shows
     """
-    fields = _with_module_form(
-        entry, (entry or {}).get("render_inputs"), maps, mapset
-    )
+    fields = _with_module_form(entry, (entry or {}).get("render_inputs"), maps, mapset)
     fields = fields[: interface.MAX_FORM_FIELDS - 1]
     fields.append(
         {
@@ -827,17 +846,14 @@ def mapset_form(entry, maps, mapset=None):
     than writing a new one, so its map parameters are choices from that
     mapset. The module's own parameters follow them.
     """
-    return _with_module_form(
-        entry, (entry or {}).get("mapset_inputs"), maps, mapset
-    )
+    return _with_module_form(entry, (entry or {}).get("mapset_inputs"), maps, mapset)
 
 
 def _map_ports(entry, inputs, values, maps, mapset=None):
     """Resolve a module's map fields into the maps of the chosen mapset."""
     values = _with_form(values)
-    by_kind = {
-        kind: set(_map_names(maps, kind)) for kind in ("raster", "vector")
-    }
+    kinds = {port.get("kind") for port in inputs or []} | {"raster", "vector"}
+    by_kind = {kind: set(_map_names(maps, kind)) for kind in kinds}
     ports, missing = [], []
     for port in inputs or []:
         name, kind = port["name"], port.get("kind")
@@ -857,7 +873,7 @@ def _map_ports(entry, inputs, values, maps, mapset=None):
             if text not in by_kind.get(kind, set()):
                 where = f"the {mapset} mapset" if mapset else "the chosen mapset"
                 raise session.GrassError(
-                    f"{entry['module']}: {text} is not a {kind} map of {where}"
+                    f"{entry['module']}: {text} is not a {kind_word(kind)} of {where}"
                 )
             picked.append(text)
         if not picked and port.get("required"):
@@ -872,6 +888,53 @@ def _map_ports(entry, inputs, values, maps, mapset=None):
                 }
             )
     return ports, missing
+
+
+#: How many bands each display module composes, with the parameter each band
+#: goes to in band order. `d.rgb` is the conventional composite; `d.his` is
+#: what fits a two-band group, where the first band is the hue and the second
+#: the intensity it is shaded by.
+COMPOSITES = {
+    3: ("d.rgb", ("red", "green", "blue")),
+    2: ("d.his", ("hue", "intensity")),
+}
+
+
+def group_display(members, mapset):
+    """Return how to draw an imagery group as one picture.
+
+    A group is an ordered set of bands, so the band order decides which band
+    is which channel: the first three of a group go to red, green and blue,
+    and a group of two to hue and intensity.
+
+    :param members: ``[(map, mapset), ...]`` in band order, as
+        :func:`grass_bridge.database.group_members` returns them
+    :param mapset: the mapset the group is in, for a band that names none
+    :return: ``(module, [arg, ...], [raster, ...], [note, ...])``
+    :raises session.GrassError: when no display module composes that many
+        bands, rather than dropping bands or inventing one
+    """
+    bands = [f"{name}@{where or mapset}" for name, where in members]
+    if len(bands) < 2:
+        raise session.GrassError(
+            f"an imagery group of {len(bands)} band cannot be composed into a "
+            "picture: add that band on its own, as a raster"
+        )
+    module, channels = COMPOSITES[3] if len(bands) >= 3 else COMPOSITES[2]
+    used = bands[: len(channels)]
+    args = [f"{channel}={band}" for channel, band in zip(channels, used)]
+    notes = [
+        f"{module} composed {', '.join(used)} as "
+        + ", ".join(channels)
+        + " (the group's own band order)."
+    ]
+    if len(bands) > len(used):
+        notes.append(
+            f"The group holds {len(bands)} bands; the first {len(used)} were "
+            f"used, because {module} composes that many. Its remaining bands "
+            f"({', '.join(bands[len(used) :])}) are there to add on their own."
+        )
+    return module, args, used, notes
 
 
 def render_plan(entry, values, maps, mapset=None):
@@ -946,9 +1009,7 @@ def render_args(entry, values, imported):
     :param imported: ``{port name: [GRASS map name, ...]}``
     :return: a list of ``name=value`` and ``-flag`` arguments
     """
-    args = _layer_args(
-        entry, (entry or {}).get("render_inputs"), values, imported
-    )
+    args = _layer_args(entry, (entry or {}).get("render_inputs"), values, imported)
     # Without -d, d.title only prints the title it would draw.
     if entry.get("module") == "d.title" and "-d" not in args:
         args.append("-d")
@@ -969,9 +1030,7 @@ def mapset_args(entry, values, imported):
     :param imported: ``{port name: [GRASS map name, ...]}``
     :return: a list of ``name=value`` and ``-flag`` arguments
     """
-    return _layer_args(
-        entry, (entry or {}).get("mapset_inputs"), values, imported
-    )
+    return _layer_args(entry, (entry or {}).get("mapset_inputs"), values, imported)
 
 
 def output_dir():

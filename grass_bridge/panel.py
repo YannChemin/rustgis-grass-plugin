@@ -52,7 +52,13 @@ ALWAYS = ("step", "status")
 #: chosen layer and the region are shown in every step that acts on them,
 #: because a run is about to use them.
 STEP_ITEMS = {
-    "data": ("gisdbase", "database", "data-add", "data-folder"),
+    "data": (
+        "gisdbase",
+        "database",
+        "data-add",
+        "data-workspace",
+        "data-folder",
+    ),
     "layer": (
         "raster",
         "source",

@@ -435,15 +435,37 @@ across the antimeridian or with no height is refused, since the extent is four
 increasing degrees. Verified on a 200x200 UTM 30N test DEM through
 `rustgis-cli`: two picked points gave 28,000 and 4,003 visible cells of 40,000.
 
-### TODO — A session plugin
+### NOT WORTH DOING — A session plugin
 
 `"session": true` keeps one program running between commands, which would hold
-the parsed catalogue and one throwaway GISDBASE instead of paying about ten
-seconds of project creation per run, and would hear `layers` and `project`
-events. It cannot refresh its own panel: `plugin.panel` is `Effect::Reserved`
-and `user_only()` refuses every `plugin.*` id to a plugin, so an event can warm
-a cache but not redraw the pane. It must delete its GISDBASE when its input
-closes, or it leaves a `.gislock` behind. See `UX_REFACTOR.md` 3.5.
+the parsed catalogue and one throwaway GISDBASE instead of creating a project
+per run, and would hear `layers` and `project` events.
+
+**The saving was measured on 2026-11-16 and it is not there.** The claim this
+entry used to make -- about ten seconds of project creation per run -- was
+wrong. Best of three, on the small test DEM:
+
+| Stage of one raster run | Time |
+|---|---|
+| `grass -c` (project creation) | 0.05 s |
+| `r.in.gdal` | 0.22 s |
+| `g.region raster=` | 0.19 s |
+| the module itself (`r.slope.aspect`) | 0.21 s |
+| `r.out.gdal` | 0.22 s |
+| python start + parsing the 3.3 MB `modules.json` | 0.04 s |
+
+A session would save project creation and the interpreter start: about 0.1 s
+of a roughly 3 s run, 3 %. Everything else is the export, the import and the
+module, which a session does not touch. Against that it would carry the whole
+of the risk -- a GISDBASE living across runs, stale state between them, and a
+`.gislock` left behind if its input closes without cleanup -- and it still
+could not refresh its own panel (`plugin.panel` is `Effect::Reserved`, and
+`user_only()` refuses every `plugin.*` id to a plugin, so an event can warm a
+cache but not redraw the pane).
+
+Revisit only if a measurement changes: a GRASS installation whose start-up is
+far slower, or a reason to need the `layers`/`project` events for something
+other than speed. See `UX_REFACTOR.md` 3.5.
 
 ### DONE — The two-minute cap, as far as the host allows
 
@@ -467,18 +489,210 @@ upstream in RustGIS, not here.
 ### PARTLY DONE — Let the form make more modules runnable
 
 Done for temporal, database and general modules whose required parameters are
-form fields or defaulted: 91 more run, each in the project/mapset chosen under
-Projects and mapsets, and `run-module` now checks required fields first.
+form fields or defaulted, and for space-time datasets: **252 modules run**, each
+in the project/mapset chosen under Projects and mapsets, and `run-module` checks
+required fields first.
+
+A word on the wording this entry used to carry. It said a required dataset or
+output "the form cannot name" blocked a module, which is what the code itself
+said in `interface._cannot_name`. That was wrong, and it hid how small the work
+was. GRASS declares these parameters `type="string"` and `--help` shows nothing
+unusual about them: `t.rast.series` has a plain `input=name` and `output=name`.
+What the bridge reacts to is the `<gisprompt>` that `--help` never prints:
+
+```
+input  | required yes | type string | gisprompt: age=old, element=strds
+output | required yes | type string | gisprompt: age=new, element=cell
+```
+
+A text box would hold either name perfectly well, and the module would run. So
+refusing them was a **policy, not an inability** — and the policy was only
+defensible on one side of it.
+
+Datasets are now offered (`t.list type=<kind> mapset=<name> format=line`, run in
+a throwaway mapset so the user's is never locked), and a dataset field is a
+dropdown of the mapset's own datasets, exactly like a map field. 27 modules now
+carry one and 23 of them run that did not before (the other four were already
+runnable on their optional parameters): `t.rast.list`, `t.rast.colors`,
+`t.rast.null`, `t.rast.gapfill`, `t.rast.boxplot`, `t.rast.univar`,
+`t.rast.what`, `t.vect.univar`, `t.rast3d.list`, `g.gui.tplot`, `t.oil.drift`,
+`t.spei`, `t.drought` and the rest. `stvds` and `str3ds` are offered too, not
+only `strds`.
+**No module is blocked on a dataset any more.** Verified against
+`~/grassdata/BusogaForestryCom`, whose PERMANENT mapset holds 13 real datasets:
+`t.rast.list` on `s2_B04@PERMANENT` returned its 20 Sentinel-2 maps with their
+timestamps.
+
+3D rasters are offered the same way, from `grid3` (a folder, so free): `g.region`,
+`r.colors`, `v.colors`, `t.rast.colors` and `t.rast3d.univar` get a dropdown of the mapset's
+voxel maps where they had a text box. It unlocks no new module, and fixes a misreported one:
+the 3D branch ran before the age check, so `t.rast.to.rast3` was told it "needs a 3D raster"
+when what it needs is a **name** for the one it writes. It now says so.
+
 Still open:
-- A required space-time dataset, raster or vector the form cannot name still
-  blocks the module (t.rast.aggregate, t.rast.series). Offer the datasets from
-  the chosen mapset in the form, or a second tree feed.
-- A required output name is not invented; modules such as `v.in.ogr` cannot run
-  until the form offers output names or the bridge names them.
-- Raster modules that need several rasters or bands remain commands only.
+- **A required output name is still not offered**, and here the policy is worth
+  keeping until it can be replaced properly: `age="new"` means the module writes
+  into the user's own mapset, and the bridge promises never to overwrite. The
+  field is easy; honouring that promise on a name the user typed is the work.
+  36 modules need one (19 of them need nothing else): `db.copy`, `db.out.ogr`,
+  `g.ppmtopng`, `m.printws`. 17 of the 36 are the dataset modules that also
+  write a map, `t.rast.series` and `t.rast.aggregate` among them, so they are
+  waiting on this alone.
+- **Raster modules that need several rasters or bands remain commands only** —
+  113 of them (88 need 2 to 5 rasters, 25 need several bands): `i.albedo`,
+  `i.biomass`, the `i.eb.*` family, `i.cva`. This one is structural, not a
+  policy: the raster path exports the one layer chosen in the panel's tree and
+  imports one result, and there is one tree and one band slider. It is the same
+  ceiling that makes the desktop's two-minute cap bite, and the reason this
+  repo's own conclusion is that heavy raster work belongs in a crate in the
+  RustGIS tree rather than behind the plugin ABI.
+- A script still cannot reach these modules in one call. `run-module` takes a
+  `module` parameter to escape the tree-value trap, but the **mapset** has none,
+  and form values are only accepted for fields the form already holds. So a
+  script needs `data-browse` twice (the first call is what sends the tree), then
+  `panel-step`, `module-pick`, then `run-module`. The panel path is unaffected.
+  A `mapset` parameter beside `module`, and form values in the command's own
+  params, would make it one call.
 
-### TODO — Refresh the screenshot
+### PARTLY DONE — Refresh the screenshot
 
-`plugin_grassgis_030.png` predates the Imagery and Temporal groups, the
-three-branch tree, the catalogue modes and the details text. A new screenshot
-would show the current ribbon and panel.
+The standard reference image is **`plugin_grassgis.png`**, the one `README.md`
+embeds (the older `plugin_grassgis_030.png` is gone). It was refreshed on
+2026-11-16 and now shows the 0.11.0 ribbon: GRASS, Data, Region (with
+**Region = Box**), Terrain, Imagery and Vector, with Modules behind the **›**
+overflow at that window width. The README's caption was rewritten to match it
+and no longer says the picture predates the refactor.
+
+Two things would still improve it, whenever the app is next open:
+
+- **The panel is not in it.** The shot shows the layer list, so the four steps,
+  the picks and the module tree -- the whole point of the 0.11.0 refactor --
+  are not visible anywhere in the README. A second image of the panel, or one
+  shot with the panel open, would show them.
+- **It has a bug frozen in its status bar**: `.: ./plugin.json: No such file or
+  directory (os error 2)`, bottom right. That was the stray relative `.` entry
+  in RustGIS's plugin folder list, removed on 2026-11-16 (see the entry below),
+  so a new shot will not show it.
+
+### DONE — Harmonise the CRS when a GRASS map is loaded into the view
+
+Asked for on 2026-11-16. Measured first, because the diagnosis mattered:
+RustGIS 0.6.0 **does** read a georeferenced raster's coordinate system and
+reproject it for display. A UTM 30N GeoTIFF added beside its EPSG:4326 twin
+comes back with degree extents matching it to five decimals, so a GRASS map
+was never in the wrong *place*, and a file with no coordinate system is
+refused outright ("the file's coordinate system isn't recognised"), not
+misplaced.
+
+What was missing is the view's own projection: a map from a projected GRASS
+project was drawn in whatever world projection the view happened to be in, not
+in the system the user's GRASS work is in. `Add Map` now puts the view in the
+GRASS project's own system (`database.Export.crs` reads `srid=` from
+`g.proj -g`; `main.harmonise_projection` calls `map.projection`), the same
+step the QGIS import makes (`crates/engine/src/cmd/qgis.rs`).
+
+It only changes the view when that cannot move someone else's data: either the
+view is still in a world projection, or the map is the only thing in it. A
+view already in another EPSG system is left alone and says so. Verified
+through `rustgis-cli`:
+
+| View before | Other layers | Result |
+|---|---|---|
+| `globe`/`mercator`/`robinson` | --- | becomes `EPSG:32630` |
+| `EPSG:32630` (the same) | --- | left; "already in" |
+| `EPSG:32631` | yes | left; "the map is reprojected for display" |
+| `EPSG:32631` | no | becomes `EPSG:32630` |
+| any | --- | XY project refused, naming the project |
+
+A projection RustGIS refuses does not fail the load: the layer is there and
+reprojected for display, so the message says what was not done. `Add Map` also
+takes `{"map": "raster/<project>/<mapset>/<name>"}` in its own parameters now,
+because a tree's value cannot be set by a script that has not browsed the tree
+(the same escape hatch `run-module` has).
+
+Still open, if it ever matters: the vector path writes a GeoPackage, which
+carries its own system, and was not re-measured here; and the display (`d.*`)
+path imports its picture with a `.pgw` world file into the GRASS project, so
+it inherits that project's system by construction.
+
+### DONE — Offer imagery groups through `d.rgb`/`d.his`, not as separate bands
+
+Asked for on 2026-11-16. A mapset's `i.group` groups are now listed above its
+loose rasters (`database.groups` reads `group/<name>/REF`, so no GRASS run is
+needed to list them), and `Add Map` composes one into a single RGB layer
+through the existing display path (`session.DisplayRun.render_mapset`).
+
+`raster.group_display` chooses the module from the band count: `d.rgb` for
+three or more (the first three; the rest are named as left out), `d.his` for
+two (hue, intensity). The **group's own band order** decides the channels,
+because that is the order given to `i.group`. A group of one band is refused
+with the advice to add the band itself, and the tree labels it
+`(group of 1, not a composite)` so the refusal is predictable rather than a
+surprise. A `REF` line that is not a `<map> <mapset>` pair is skipped: a wrong
+map in a composite is worse than a missing one.
+
+Every message says the layer is a picture of the bands, not their values, as
+the `d.*` path already does.
+
+Verified through `rustgis-cli` on groups of 1, 2, 3 and 4 bands.
+
+### DONE — Find and offer the `.gxw` workspaces as projects
+
+Asked for on 2026-11-16. The workspaces found in the GRASS database and under
+the home folder are listed above the projects in the Data tree, labelled by
+the project and mapset they open and their layer count (the file name is
+almost always `default.gxw`). **Load Workspace** opens one: every raster and
+vector of its first map display, in order, with a layer the workspace had
+unticked loaded but not drawn; then the view's coordinate system and the
+display's own extent, projected with `m.proj`.
+
+Three things the notes above worried about, as they turned out:
+
+- **The scan is cheap once it prunes the right thing.** Not depth: the GRASS
+  mapsets. Walking them took **6.5 s** (this database holds 35,000 maps);
+  skipping any folder with a `WIND` file takes **0.27 s** for the same 26
+  workspaces, so there is no cache to go stale. The database is listed rather
+  than walked, since GRASS writes a project's workspace beside it.
+- **"Clean from any previous project" cannot be done as asked.** `project.new`
+  carries `Effect::Replaces`, which RustGIS reserves to the user: a plugin is
+  refused it outright ("plugins can't run another plugin's code, automation or
+  reserved actions"). Clearing the layers is what a plugin may do, and that is
+  what it does; the messages say the project's own name and file are unchanged
+  rather than implying a new project. A project with unsaved changes stops the
+  load unless `{"discard": true}` is passed.
+- **Loading is a button, not a click on the name.** The request was to load on
+  clicking the workspace, but a click in a tree is easy to make by accident
+  and this one clears the project's layers. Clicking selects it and the status
+  says what will happen; **Load Workspace** does it.
+
+Verified on this machine's own workspaces: Maldives (2 layers, framed on
+73.33, 3.89 to 73.59, 4.34) and IGN (6 layers, of which only the one ticked in
+GRASS is drawn). A geographic project (EPSG:4326) is reported as it is -
+RustGIS refuses a degrees system as the view's projection - without failing
+the load.
+
+### DONE — The `.` in RustGIS's plugin folder list
+
+On 2026-11-16 RustGIS 0.6.0 failed at start-up with
+
+```
+.: ./plugin.json: No such file or directory (os error 2)
+```
+
+`rustgis-cli plugins install .` records the path **as given**, so a relative
+one goes into `~/.local/share/rustgis/plugins/state.json` verbatim and is then
+resolved against whatever working directory RustGIS is launched from -- which
+is never the plugin's folder. The entry was removed (a backup of `state.json`
+is beside it) and the start-up error is gone.
+
+Two things to keep in mind:
+
+- Always register with an absolute path: `rustgis-cli plugins install
+  "$PWD"`, never `.`. Canonicalising the path belongs upstream in RustGIS;
+  `plugins uninstall` takes an id, not a folder, so a bad entry cannot be
+  removed through the CLI when another folder declares the same id.
+- `state.json` still lists **two** folders that both declare `grass-vector`:
+  the development tree `~/dev/rustgis-grass-plugin` and the installed copy
+  `~/.local/share/rustgis-grass-plugin`. Only one of them can win, and which
+  is not stated anywhere. Keep the installed copy for using the plugin and the
+  development tree only while working on it.

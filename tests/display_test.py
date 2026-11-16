@@ -30,9 +30,7 @@ def raster(path, function, width=120, height=80):
     dataset.SetProjection("EPSG:4326")
     band = dataset.GetRasterBand(1)
     band.SetNoDataValue(255)
-    band.WriteArray(
-        np.fromfunction(function, (height, width)).astype("uint8")
-    )
+    band.WriteArray(np.fromfunction(function, (height, width)).astype("uint8"))
     dataset = None
     return str(path)
 
@@ -80,9 +78,7 @@ def check_picture(path, width=120, height=80):
 
 def test_a_raster_display_module_renders_an_rgb_picture(tmp_path):
     base, project = make_project(tmp_path)
-    source = raster(
-        tmp_path / "a.tif", lambda y, x: (x * 3 + y * 2) % 250
-    )
+    source = raster(tmp_path / "a.tif", lambda y, x: (x * 3 + y * 2) % 250)
     import_into(project, "r.in.gdal", f"input={source}", "output=src1")
     target = tmp_path / "out.tif"
     with session.DisplayRun() as run:
@@ -111,10 +107,18 @@ def test_his_and_rgb_render_several_maps_of_the_same_mapset(tmp_path):
         import_into(project, "r.in.gdal", f"input={path}", f"output={name}")
     maps = ["src1@PERMANENT", "src2@PERMANENT", "src3@PERMANENT"]
     for module, args in (
-        ("d.his", ["hue=src1@PERMANENT", "intensity=src2@PERMANENT",
-                   "saturation=src3@PERMANENT"]),
-        ("d.rgb", ["red=src1@PERMANENT", "green=src2@PERMANENT",
-                   "blue=src3@PERMANENT"]),
+        (
+            "d.his",
+            [
+                "hue=src1@PERMANENT",
+                "intensity=src2@PERMANENT",
+                "saturation=src3@PERMANENT",
+            ],
+        ),
+        (
+            "d.rgb",
+            ["red=src1@PERMANENT", "green=src2@PERMANENT", "blue=src3@PERMANENT"],
+        ),
     ):
         target = tmp_path / f"{module.replace('.', '_')}.tif"
         with session.DisplayRun() as run:

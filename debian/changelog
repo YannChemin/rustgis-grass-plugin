@@ -45,6 +45,20 @@ rustgis-grass-plugin (0.11.0) unstable; urgency=medium
     whole layer; its region-box command is also on the ribbon. A box drawn
     across the antimeridian is refused, since the Analysis Environment's
     extent is four increasing degrees.
+  * The GRASS workspaces (.gxw) found in the database and under the home
+    folder are listed above the projects, and Load Workspace opens one:
+    its layers in their ticked state, its coordinate system and its
+    extent. It clears the project's layers, so a project with unsaved
+    changes stops it unless discard is passed; it cannot replace the
+    project itself, which RustGIS reserves to the user.
+  * A mapset's imagery groups are listed above its maps, and Add Map
+    composes one into a single RGB layer: d.rgb for three bands or more,
+    d.his for two, in the group's own band order. A group of one band is
+    refused, advising the band be added on its own.
+  * Add Map puts the view in the GRASS project's own coordinate system,
+    read from g.proj -g, unless the view already holds layers drawn in
+    another EPSG system. A map from an XY project is refused with its
+    reason named. Add Map also takes a map parameter, for scripts.
   * Every raster command declares a timeout of a day, so the command line,
     Python and scripts no longer cut off r.watershed on a large DEM. The
     desktop app still stops any command at 120 seconds whatever the manifest
@@ -58,8 +72,20 @@ rustgis-grass-plugin (0.11.0) unstable; urgency=medium
     reports to MetaMonitor where mmctl is installed, and
     rustgis-grass-setup, the README and the man page say what the wait is for
     before it starts.
-  * The manifest's version is 0.11.0; its 27 panel items, 42 commands, 64 tools
-    and 7 ribbon groups.
+  * A module parameter that names a space-time dataset is a dropdown of the
+    chosen mapset's own datasets, read with t.list in a throwaway mapset so
+    the user's is never locked, and a parameter naming a 3D raster is one of
+    its grid3 maps. 23 more modules run (252 in all): t.rast.list,
+    t.rast.colors, t.rast.univar, t.rast.what, t.vect.univar and the rest of
+    the 27 that take a dataset. No module is refused for naming a dataset any
+    more; one that must name a map it writes still is, and now says so --
+    t.rast.to.rast3 reported a missing 3D raster when what it needs is a name
+    for the one it writes.
+  * The panel no longer tells a module it takes no raster when Run Module runs
+    it: a temporal or display module was shown the raster path's reason for a
+    path it was never on.
+  * The manifest's version is 0.11.0; its 28 panel items, 43 commands, 64
+    tools and 7 ribbon groups.
 
  -- Yann Chemin <dr.yann.chemin@gmail.com>  Mon, 16 Nov 2026 12:00:00 +0100
 

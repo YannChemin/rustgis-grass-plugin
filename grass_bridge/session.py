@@ -66,6 +66,7 @@ def budget_asked(params, default=COMMAND_LIMIT):
         )
     return seconds
 
+
 #: The widest or tallest a rendered picture may be, so a fine region does not
 #: produce a huge grid for what is only a picture of colours.
 RENDER_MAX_PIXELS = 2048
@@ -373,6 +374,51 @@ class Run:
             raise GrassError(f"cannot create a project from {crs}: {_why(out)}")
         return path
 
+    def crs(self, base, project):
+        """Return the project's coordinate system, as ``EPSG:<code>``.
+
+        ``g.proj -g`` prints ``srid=EPSG:32630`` for a project with a
+        coordinate system and no ``srid`` at all for an XY one, so a project
+        that names no EPSG code is reported as having none rather than guessed
+        at from its projection parameters.
+
+        Not knowing it is not an error here: the caller decides what to do
+        about it, because a map still loads (RustGIS reads the coordinate
+        system from the exported file) and only the view's own projection is
+        at stake.
+
+        :param base: the GRASS database
+        :param project: the project's name
+        :return: ``"EPSG:<code>"``, or None when the project names none
+        """
+        path = os.path.join(base, project)
+        command = [
+            self.grass,
+            "--tmp-mapset",
+            path + os.sep,
+            "--exec",
+            "g.proj",
+            "-g",
+        ]
+        try:
+            out = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=self.left(),
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            return None
+        if out.returncode != 0:
+            return None
+        for line in (out.stdout or "").splitlines():
+            key, _, value = line.partition("=")
+            if key.strip() == "srid":
+                code = value.strip()
+                return code if code.upper().startswith("EPSG:") else None
+        return None
+
     def exec(self, project, module, *args, mapset="PERMANENT", env=None):
         """Run one module in ``project`` and return its standard output.
 
@@ -399,6 +445,45 @@ class Run:
         for text in _warnings(out.stderr or ""):
             self.warnings[text] = self.warnings.get(text, 0) + 1
         return out.stdout
+
+    def to_degrees(self, project, extent):
+        """Return ``[west, south, east, north]`` in degrees for a project box.
+
+        A GRASS project's own coordinates are whatever its system uses, and
+        the RustGIS commands that take an extent take degrees. The four
+        corners are projected with ``m.proj -o`` and their bounding box
+        returned, rather than the two opposite corners alone: in a projected
+        system the edges of a box are not straight in longitude and latitude,
+        so two corners would cut the frame short.
+
+        :param project: the project's path
+        :param extent: ``[west, south, east, north]`` in the project's system
+        :raises GrassError: when m.proj cannot place a corner
+        """
+        west, south, east, north = (float(value) for value in extent)
+        lons, lats = [], []
+        for x, y in (
+            (west, south),
+            (west, north),
+            (east, south),
+            (east, north),
+        ):
+            out = self.exec(
+                project, "m.proj", "-o", "-d", f"coordinates={x},{y}", "separator=comma"
+            )
+            parts = (out.strip().splitlines() or [""])[0].split(",")
+            try:
+                lons.append(float(parts[0]))
+                lats.append(float(parts[1]))
+            except (IndexError, ValueError) as e:
+                raise GrassError(
+                    f"m.proj could not put {x},{y} into longitude and latitude "
+                    f"(it answered {out.strip()!r})"
+                ) from e
+        box = [min(lons), min(lats), max(lons), max(lats)]
+        if box[0] >= box[2] or box[1] >= box[3]:
+            raise GrassError("the extent has no area once in longitude and latitude")
+        return box
 
     def _region(self, project):
         """Return ``g.region -g`` as a dictionary."""
@@ -427,9 +512,9 @@ class Run:
         self.progress(f"Running {module} in {project}/{mapset}...")
         out = self.exec(path, module, *args, mapset=mapset)
         messages = [f"{module} ran in GRASS project {project}, mapset {mapset}."]
-        printed = [
-            line.strip() for line in (out or "").splitlines() if line.strip()
-        ][-20:]
+        printed = [line.strip() for line in (out or "").splitlines() if line.strip()][
+            -20:
+        ]
         messages += [line[:500] for line in printed]
         for text, count in self.warnings.items():
             messages.append(

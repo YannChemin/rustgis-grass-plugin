@@ -141,6 +141,42 @@ plugin:grass-vector/region-box={"panel": {"region-box": {"bbox": [-2.0, 47.0, -1
 - Choosing a layer runs `layer-pick` and choosing a module runs `module-pick`: each
   answers only what it changed, so neither sends the catalogue back. **Run Module** is
   disabled for a module this panel cannot drive, and **Chosen module** says why.
+- **A GRASS workspace (`.gxw`) opens as a ready-made project.** The panel's Data tree
+  lists the workspaces found in the GRASS database and under the home folder *above*
+  the projects, labelled by the project and mapset they open and their layer count.
+  **Load Workspace** loads every raster and vector of the workspace's first map
+  display, keeps a layer the workspace had unticked loaded but **not drawn**, puts the
+  view in the GRASS project's coordinate system and frames the workspace's own extent.
+  Tell the user two things when they ask for it: it **clears the project's layers**
+  (and refuses outright if the project has unsaved changes, unless `discard` is
+  passed), and it does **not** replace the project itself -- a plugin may not, so the
+  project's name and file are unchanged. Reach it from a script with
+  `{"workspace": "workspace/<percent-encoded path>", "discard"?: true}`; the path is
+  percent-encoded because a node id is built with `/`.
+
+- **An imagery group is offered as one composite, not as its bands.** A mapset's
+  `i.group` groups are listed above its loose rasters, labelled with their band
+  count. `Add Map` on a group composes it with `d.rgb` (3 bands or more, the first
+  three) or `d.his` (2 bands: hue, intensity), in the **group's own band order**, and
+  adds one RGB layer. A group of one band is refused, advising that the band be added
+  on its own; the tree labels it `(group of 1, not a composite)`. A group of more than
+  three says which bands were left out. Tell the user the result is **a picture of the
+  bands, not their values** -- it is not something to run analysis on -- exactly as the
+  display modules' output is. Reach it from a script with
+  `{"map": "group/<project>/<mapset>/<name>"}`.
+
+- **Add Map also sets the view's coordinate system.** RustGIS already reprojects a
+  layer for display, so a GRASS map is never in the wrong place; what `Add Map` adds
+  is putting the *view* in the GRASS project's own system, read from `g.proj -g`. It
+  does this only when the view is still in a world projection (`globe`, `mercator`)
+  or holds nothing else -- a view already in another `EPSG:` system with layers in it
+  is left alone, and the message says so. Report which happened instead of implying
+  the view was changed. A map from an **XY project** is refused, naming the project:
+  it has no coordinate system, so nothing can place it. `Add Map` takes
+  `{"map": "raster/<project>/<mapset>/<name>"}` in its own parameters, which is the
+  only way to reach it from a script, since a tree's value cannot be set without
+  having browsed the tree.
+
 - **A raster run stops after two minutes unless it is told otherwise.** Every raster
   command declares a day in the manifest, but that only holds away from the desktop
   app, which stops any command at 120 seconds; the plugin cannot tell which host it is

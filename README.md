@@ -8,15 +8,16 @@ bridge as a crate in the RustGIS tree.
 [GRASS_INTERFACE.md](GRASS_INTERFACE.md) is the survey of RustGIS's extension points this was
 designed from, written before the prototype and partly superseded by it.
 
-![RustGIS with the plugin's own GRASS ribbon tab open, showing the Database, Region, Raster and
-Vector groups, above the World Atlas sample map](plugin_grassgis.png)
+![RustGIS with the plugin's own GRASS ribbon tab open, showing the GRASS, Data, Region, Terrain,
+Imagery and Vector groups above the World Atlas sample map](plugin_grassgis.png)
 
-Above is the plugin's own **GRASS** ribbon tab (the screenshot predates the 0.11.0 refactor):
-**GRASS** opens the panel, **Data** reaches the GRASS database and adds a map from it,
-**Region** sets the computational region, **Terrain** runs slope, aspect and viewshed or the
-common raster modules in menus, **Imagery** does the same for the imagery modules, **Vector**
-holds the 64 generated tools in nine themed menus, and **Modules** holds **Run Module** and the
-**Catalogue** filters.
+Above is the plugin's own **GRASS** ribbon tab: **GRASS** opens the panel, **Data** reaches the
+GRASS database and adds a map or an imagery group from it, **Region** sets the computational
+region from the view, the layer or a box drawn on the map, **Terrain** runs slope, aspect and
+viewshed or the common raster modules in menus by theme, **Imagery** does the same for the
+imagery modules, and **Vector** holds the 64 generated tools in nine themed menus. **Modules**,
+holding **Run Module** and the **Catalogue** filters, is past the right edge at this window
+width, behind the **›** overflow.
 
 GRASS is not bundled, linked or copied here. Each run spawns the `grass` launcher already
 installed on the machine, and every tool's form is read from that installation at build time with
@@ -26,15 +27,15 @@ Apache-2.0 GIS this way.
 
 ## What it offers
 
-Everything the installation has. On this machine that is **1,182 modules**, addons included, of
-which **1,177** could describe themselves:
+Everything the installation has. On this machine that is **1,205 modules**, addons included, of
+which **1,195** could describe themselves:
 
 | Family | Modules | Family | Modules |
 |---|---|---|---|
-| Raster (`r.*`) | 455 | General (`g.*`) | 55 |
-| Vector (`v.*`) | 223 | Display (`d.*`) | 49 |
-| Imagery (`i.*`) | 177 | 3D Raster (`r3.*`) | 35 |
-| Temporal (`t.*`) | 74 | Database (`db.*`) | 22 |
+| Raster (`r.*`) | 456 | General (`g.*`) | 55 |
+| Vector (`v.*`) | 225 | Display (`d.*`) | 49 |
+| Imagery (`i.*`) | 186 | 3D Raster (`r3.*`) | 35 |
+| Temporal (`t.*`) | 80 | Database (`db.*`) | 22 |
 | Planetary (`p.*`) | 67 | Miscellaneous (`m.*`) | 14 |
 | Tests (`test.*`) | 4 | PostScript (`ps.*`) | 1 |
 
@@ -44,27 +45,33 @@ They are reached three ways, because the ABI gives three and each has a ceiling:
 |---|---|---|
 | **Tools**, with a generated form in the Tools pane | 64 vector modules | a manifest holds **64 tools**, and a tool takes no raster, so only vector modules qualify: 128 do, half of them fit |
 | **Commands** on the ribbon | Slope, Aspect, Viewshed, **18 common raster modules** and **7 imagery modules** in menus by theme, the region and the database | a manifest holds up to **256 commands**, and a command opens no dialog, so each needs the panel to be told anything |
-| **Run Module**, from the panel's tree | **all 1,177** are reached and show their parameters; the **88** that read one raster and write one, **91** temporal, database and general modules whose form is all they need, **25** that change a map of the chosen mapset in place (`r.colors`, `v.db.update`), and **19** display modules that render a picture, can be run | a command has no form of its own, so the panel's **Module parameters** form sends the values it holds; the rest still need a raster, vector or dataset the form cannot name |
+| **Run Module**, from the panel's tree | **all 1,195** are reached and show their parameters; **252** can be run: the **88** that read one raster and write one, **145** temporal, database and general ones whose form is all they need (imports such as `t.in.era5`, changes to a map of the chosen mapset in place such as `r.colors` and `v.db.update`, and the modules that work on a space-time dataset of that mapset such as `t.rast.list` and `t.rast.colors`), and **19** display modules that render a picture | a command has no form of its own, so the panel's **Module parameters** form sends the values it holds; the rest still need a name for what they write, or several rasters at once |
 
-The tree is searchable and has three branches: **Runs from here** (the 223), **All modules**
-(every module, with its reason for not running here) and **Recently run**. A **Catalogue**
+The tree is searchable and has three branches: **Runs from here** (the 252), **All modules**
+(all 1,195, each with its reason for not running here) and **Recently run**. A **Catalogue**
 dropdown above it keeps all modules, only the imagery (`i.*`) ones, or only the temporal
 (`t.*`) ones; the ribbon's **Modules › Catalogue** menu sets the same filter and brings the
 panel to its module step.
-A temporal, database or general module does not read one raster and write another: it
-imports a dataset or changes the project it runs in. Those run from the form, writing into
-the project and mapset chosen under **Projects and mapsets** (so `t.in.era5` can download a
-variable straight into a mapset); one whose required parameter names a space-time dataset
-or a raster the form cannot set keeps its reason. A display module (`d.*`) does not write a
-map either: it draws a picture of maps from the GRASS mapset chosen under **Projects and
-mapsets**, and the 19 that can draw without a monitor return it as an RGB raster layer,
-optionally kept as a PNG preview as well. Every input of one render comes from that same
-mapset, and the fields stay visible when it holds no map of a kind. The rest need a live display, ask
-for a map to edit, or cannot run in this GRASS build, and keep their reason. A module Run Module can drive is marked
-with **▸**; the others carry their reason, such as *needs several bands* or *needs an
-imagery group*, and choosing one says what it reads and writes in the **Chosen module**
-text before Run Module is pressed. The 64 modules that could have been tools but did not fit are listed in
-`modules.json` under `toolsLeftOut`, as are the five that could not be read at all.
+Not every module reads one raster and writes another, so **Run Module** has three paths:
+
+- A **temporal, database or general** module imports a dataset or changes the project it runs
+  in. It runs from the form, writing into the project and mapset chosen under **Projects and
+  mapsets**, so `t.in.era5` downloads a variable straight into a mapset and `r.colors` changes a
+  map there in place. A parameter that names a **space-time dataset** becomes a dropdown of that
+  mapset's own datasets, the way a map parameter becomes a dropdown of its maps, so
+  `t.rast.list`, `t.rast.colors`, `t.rast.univar` and 24 others run from the form. One that must
+  **name what it writes** keeps its reason: `age="new"` means a new map in the user's own
+  mapset, and the bridge will not invent a name it cannot promise is free.
+- A **display** module (`d.*`) draws a picture of maps from that same mapset rather than writing
+  one. The 19 that can draw without a monitor return it as an RGB raster layer, optionally with
+  a PNG preview. Every input of a render comes from that mapset, and the fields stay visible when
+  it holds no map of a kind.
+- The **rest** need a live display, ask for a map to edit, or cannot run in this GRASS build.
+
+A module Run Module can drive is marked **▸**; the others carry their reason — *needs several
+bands*, *needs an imagery group* — and choosing one says what it reads and writes in **Chosen
+module** before Run Module is pressed. The 65 modules that could have been tools but did not fit
+are listed in `modules.json` under `toolsLeftOut`, as are the 10 that could not be read at all.
 
 Choosing a module also fills the **Module parameters** form with that module's own parameters,
 read from its GRASS interface description: text boxes, whole and fractional numbers, checkboxes
@@ -75,12 +82,10 @@ number field cannot hold it. Fields start at the module's defaults; clearing a t
 selection leaves the parameter out, so GRASS uses its own default. Changing the chosen module
 keeps the values of fields with the same name and starts the new ones at their defaults.
 
-So "every GRASS module" is true for *reaching* them and for *showing their parameters*: 1,177
-forms are generated from the installation. It is false for *running* them from the panel: the
-88 raster ones run on the chosen layer, 91 temporal, database and general ones run with their
-form in a chosen mapset, 25 change a map of that mapset in place, 19 display ones
-render to a layer, and the rest still need inputs or outputs a command cannot supply.
-The 64-tool form budget is the ABI's; the panel's form has no such budget.
+So "every GRASS module" is true for *reaching* them and for *showing their parameters*: 1,195
+forms are generated from the installation. It is false for *running* them from the panel: 252
+can be run, and the rest still need a name for what they write, or several rasters at once. The 64-tool form
+budget is the ABI's; the panel's form has no such budget.
 
 ### The panel: four steps, not one column
 
@@ -91,7 +96,7 @@ and region, the terrain controls and the module catalogue interleaved.
 
 It is four steps now, in the order the work is actually done. A **Step** dropdown at the top
 sets which one is drawn, and every answer sets each widget's `visible` from it, so **at most
-eleven widgets are drawn at once** instead of 24:
+twelve of its 27 widgets are drawn at once**:
 
 | Step | Holds |
 |---|---|
@@ -134,7 +139,7 @@ an icon of its own:
 |---|---|
 | GRASS | the panel |
 | Data | GRASS Database, Add Map, Browse Mapset |
-| Region | Region = Map View, Region = Whole Layer, Refresh Rasters |
+| Region | Region = Map View, Region = Whole Layer, Region = Box, Refresh Rasters |
 | Terrain | Slope, Aspect, Viewshed, and menus of raster modules: Terrain, Hydrology, Filters, Surfaces, Sun |
 | Imagery | menus of imagery modules: Enhance, Preprocess, Detect, Geometry |
 | Vector | the 64 tools in nine themed menus: Overlay & clip, Geometry, Points & lines, Proximity & sampling, Network, Point clouds & LIDAR, Generalize & clean, Transform & project, Tables & import |
@@ -159,7 +164,7 @@ Everything the plugin ABI offers that a GRASS bridge can make use of, as of Rust
 | `file` tool parameters | the rules, node and control-point files of `v.segment`, `v.net`, `v.extract`, `v.rectify`, `v.lrs.segment` |
 | `tables` beside `layers` in a tool's result | rows a module writes without geometry |
 | `commands` (up to 256) | the shaped slope/aspect/viewshed runs, 18 common raster modules, 7 imagery modules, the region, the database, the catalogue filters, and the three that drive the panel itself |
-| `commands[].timeout` | a day for `run-module`, so a download (`t.in.era5`) is not cut off at two minutes — on the command line, in Python and in scripts; the desktop app still stops a command at 120 seconds |
+| `commands[].timeout` | a day for all 30 commands that run GRASS, so neither a download (`t.in.era5`) nor `r.watershed` on a large DEM is cut off at two minutes — on the command line, in Python and in scripts; the desktop app still stops a command at 120 seconds whatever the manifest says |
 | a `tab` of its own, with compact columns and nested menus | the GRASS tab: GRASS, Data, Region, Terrain and Imagery (with menus by theme), Vector (nine themed menus), Modules — every entry with an icon of its own |
 | a `panel`, with `tree` widgets that search and a `form` | the GRASS database, the map's rasters, the band, the module tree with its three branches, the chosen module's details, and its parameters as a form Run Module sends |
 | a panel item's `visible` and `enabled` | the four steps, which draw at most twelve widgets of the 27 at a time, and Run Module disabled for a module the panel cannot drive |
@@ -206,7 +211,7 @@ Needs GRASS GIS 8 and Python 3 on the machine. `RUSTGIS_GRASS` names the launche
 on the `PATH`.
 
 ```sh
-python3 generate_manifest.py                      # about 3.5 min: one GRASS run per module
+python3 generate_manifest.py                      # about 2 min: one GRASS run per module
 rustgis-cli plugins install ./rustgis-grass-plugin
 rustgis-cli run --sample \
   --cmd 'gp.run={"tool":"plugin:grass-vector/v-voronoi","params":{"input":"Cities"}}'
@@ -252,6 +257,13 @@ Rows a module writes with no geometry — `v.distance`'s upload table, say — c
 standalone **table** rather than a layer with nothing to draw, and the messages count both
 halves, so neither is dropped in silence.
 
+`generate_manifest.py` prints what it had to leave out of each tool, and the mapper refuses what
+RustGIS would not take rather than offering something that cannot work: a raster parameter, a
+name with a digit in it (`v.gsflow.segments` has `width1`), a name the module declares twice (the
+same module declares four of them twice over), and a file the module writes although it declares
+it as one it reads (`v.rectify`'s `rmsfile`), since a file picker cannot name a file that does
+not exist yet.
+
 ## How a raster run works
 
 A tool cannot do this. RustGIS's plugin ABI gives a tool `layer`, `vectorLayer`, `polygonLayer`,
@@ -285,7 +297,7 @@ command its permissions allow, which is enough to carry a raster in and out:
 The result stays in `~/.cache/rustgis-grass-plugin/`, because RustGIS reads the file when the
 layer is added and keeps the path; each message says where it is.
 
-### The GRASS database
+## The GRASS database
 
 The panel's **Projects and mapsets** tree is the database GRASS itself uses, found the way GRASS
 finds it: `GISDBASE` when set, otherwise the `GISDBASE:` line of `~/.grass8/rc`, otherwise
@@ -293,10 +305,12 @@ finds it: `GISDBASE` when set, otherwise the `GISDBASE:` line of `~/.grass8/rc`,
 
 | Step | What happens |
 |---|---|
-| Open the panel | Projects and mapsets are read from the file system — a project is a folder with a PERMANENT mapset, a mapset one with a `WIND` file. 51 projects, 35,241 maps, in 0.03 s |
-| Choose a mapset | Its maps are listed: `cellhd` entries are rasters, `vector` folders are vectors. They load only then, because 35,000 maps do not fit a tree that takes 5,000 nodes |
-| Choose a map, then **Add Map** | It is exported and added to the project: a raster as a GeoTIFF, a vector as a GeoPackage, both of which carry the coordinate system |
+| Open the panel | The **workspaces** are listed first (below), then projects and mapsets are read from the file system — a project is a folder with a PERMANENT mapset, a mapset one with a `WIND` file. 51 projects, 35,241 maps, in 0.03 s |
+| Choose a mapset | Its imagery groups are listed first, then its maps: `cellhd` entries are rasters, `vector` folders are vectors. They load only then, because 35,000 maps do not fit a tree that takes 5,000 nodes |
+| Choose a map, then **Add Map** | It is exported and added to the project: a raster as a GeoTIFF, a vector as a GeoPackage, both of which carry the coordinate system. The view is then put in that GRASS project's own system (below) |
+| Choose a **group**, then **Add Map** | Its bands are composed into one picture by the display module that fits, and added as a single RGB layer (below) |
 | Choose a mapset, then **Run Module** | A temporal, database or general module runs in that mapset, so what it writes outlives the run: `t.in.era5` imports its space-time dataset there |
+| Choose a **workspace**, then **Load Workspace** | Its GRASS project's layers are loaded, in the state the workspace left them |
 | **GRASS Database** | Puts the database folder in the browser's **Folders** (`project.addFolder`) |
 
 The status bar reports each one — *GRASS GIS Tools: forest_ndvi@PERMANENT added from IGN.*
@@ -306,6 +320,94 @@ across mapsets as `name@mapset`. Nothing of the user's is written to, their own 
 locked, and a GRASS session they have open elsewhere is undisturbed. A **Run Module** for a
 temporal, database or general module is the exception: it runs in the chosen mapset, because
 the dataset it makes is meant to stay there.
+
+### Workspaces: a project someone already set up
+
+A GRASS workspace (`.gxw`) is the GRASS GUI's own file: XML naming a database, a project and a
+mapset, with the layers that were displayed and whether each was ticked. They are listed **above**
+the raw projects and mapsets, because a workspace is a project already arranged — labelled by
+what it opens, not by its file name, which is almost always `default.gxw`:
+
+```
+Workspaces (26)
+  Maldives/PERMANENT (2 layers) - Maldives/default.gxw
+  IGN/PERMANENT (6 layers) - IGN/default.gxw
+```
+
+They are looked for in the GRASS database and under the home folder. **Where it does not look
+matters more than how deep it goes:** a GRASS mapset — any folder holding a `WIND` file — is
+never listed, because that is where a database's 35,000 maps are. Walking into them took **6.5 s**;
+pruning them takes **0.27 s** for the same 26 workspaces, so the scan runs on each panel open
+rather than being cached into something that can go stale. The database itself is not walked at
+all: GRASS writes a project's workspace beside it, so one listing of the project folders finds it.
+Hidden folders, `node_modules`, `venv`, `target` and the like are skipped, and the walk stops four
+levels down.
+
+**Load Workspace** then opens one:
+
+| | |
+|---|---|
+| Layers | Every raster and vector of its **first** map display is exported and added, in its order. A layer the workspace had unticked is loaded but **not drawn**, so the project matches what GRASS was showing. If the workspace has several displays, the first one's layers are loaded and the rest are reported, because RustGIS has one map |
+| Coordinate system | The view is put in the GRASS project's own system, as **Add Map** does |
+| Extent | The view is framed on the display's own extent, projected out of the project's system with `m.proj` |
+| One bad layer | Reported and skipped, not fatal — a workspace that names a map since deleted still opens |
+
+Two things it deliberately does **not** do:
+
+- **It is not loaded by clicking the name.** Clicking selects it and says what will happen; the
+  button does it. Loading clears the project's layers, and losing work to a mis-click in a tree
+  is not something to do quietly.
+- **It does not replace the project.** `project.new` carries RustGIS's `Replaces` effect, which
+  is reserved: a plugin may not replace someone's project, by design. What the plugin may do is
+  clear the layers, which is what it does, and the messages say the project's own name and file
+  are untouched rather than implying a new one. A project with **unsaved changes stops the load**
+  entirely, unless `{"discard": true}` says otherwise.
+
+### Imagery groups arrive composed, not as a stack of grey bands
+
+A GRASS imagery group (`i.group`) is a named, **ordered** set of bands meant to be seen together.
+Listing its members one by one means loading three grey layers and composing them by hand, so a
+group is offered as one entry, above the loose rasters, and **Add Map** composes it:
+
+| Bands in the group | Composed by | Channels, in the group's band order |
+|---|---|---|
+| 3 or more | `d.rgb` | red, green, blue — a fourth band and beyond are left out, and said to be |
+| 2 | `d.his` | hue, intensity |
+| 1 | — | refused: *"add that band on its own, as a raster"*, and the tree labels it `(group of 1, not a composite)` |
+
+The group's own band order decides which band is which channel, because that is the order the
+user gave `i.group`. The group is read from the mapset's `group/<name>/REF` file — `<map> <mapset>`
+per line — like everything else in the tree, so no GRASS run is needed to list groups. A `REF`
+line that is not a `<map> <mapset>` pair is skipped rather than guessed at: a wrong map in a
+composite is worse than a missing one.
+
+The render goes through the same path as the `d.*` modules (a cairo monitor, a `.pgw` world file,
+`r.in.gdal`), so the result is a three-band GeoTIFF on the maps' own grid. Every message says what
+it is: **a picture of the bands, not their values — for looking at, not for running analysis on.**
+
+### The view's coordinate system
+
+RustGIS reads a layer's coordinate system from the file and reprojects it for display, so a GRASS
+map always lands in the right **place**: a UTM 30N GeoTIFF added beside its EPSG:4326 twin comes
+back with degree extents matching it to five decimals, and a file carrying no system at all is
+refused rather than misplaced. What RustGIS does not do is adopt that system as the **view's own**,
+so a map from a projected GRASS project was drawn in whatever world projection the view happened to
+be in -- not the system the GRASS work is in.
+
+**Add Map** now harmonises it, the same step the QGIS import makes: it reads `srid=` from
+`g.proj -g` and calls `map.projection`. It only changes the view when that cannot move someone
+else's data under them:
+
+| View before | Other layers in it | What happens |
+|---|---|---|
+| `globe`, `mercator`, `robinson` … | — | becomes the GRASS project's system |
+| already that system | — | left alone, said to be |
+| another `EPSG:` system | yes | **left alone** — the map is reprojected for display, so it is still in the right place |
+| another `EPSG:` system | no | becomes the GRASS project's system |
+
+A system RustGIS refuses does not fail the load: the layer is there, and the message says what was
+not done. A map from an **XY project** is refused with its reason named — that project has no
+system to write, so the export carries none and there is nothing to place it by.
 
 Two things the host decides, not the plugin:
 
@@ -318,7 +420,7 @@ Two things the host decides, not the plugin:
   `srs_id 100000` and no EPSG code, and RustGIS says so when it reads it as longitude/latitude.
   That notice is RustGIS's, and it is right to make it.
 
-### The computational region
+## The computational region
 
 A GRASS raster module takes its extent and resolution from `g.region`, not from its inputs, so
 that is what RustGIS's own **Analysis Environment** sets. Every run reads `gp.env` and applies it:
@@ -329,10 +431,10 @@ that is what RustGIS's own **Analysis Environment** sets. Every run reads `gp.en
 | **Environments › Cell Size** (degrees) | `g.region nsres= ewres= -a`, converted to the raster's units at the region's latitude |
 | The panel's **Cell size** slider (the raster's own units, 0 = off) | `g.region res= -a`, overriding the environment |
 
-The panel's **Region = Map View** and **Region = Whole Layer** buttons set the environment's
-extent to the view or clear it, and **Region from a Box** asks for a box on the map and sets the
-extent to it — the third way GRASS users expect to set a region, beside the view and the whole
-layer. So the region can be driven without leaving the panel, and the panel shows the region in
+**Region = Map View** and **Region = Whole Layer** set the environment's extent to the view or
+clear it, and **Region = Box** on the ribbon — the **Region from a Box** pick in the panel — asks
+for a box on the map and sets the extent to it: the third way GRASS users expect to set a region,
+beside the view and the whole layer. So the region can be driven without leaving the panel, and the panel shows the region in
 force. A box drawn across the antimeridian is refused with its own message, because the
 environment's extent is four increasing degrees and such a box would silently mean the rest of
 the world. A degree of longitude shortens away from the equator, so a cell
@@ -351,7 +453,32 @@ The vector tools get the extent for free and never see the cell size: RustGIS fi
 features by the environment's extent before the tool runs (471 features of the sample `Cities`
 layer become 80 under a European extent), and the region is then set from what arrives.
 
-### The two-minute cap
+## Space-time datasets are read, not guessed
+
+A map is a folder, so the plugin lists a mapset's maps from the file system and it costs
+nothing — rasters from `cellhd`, vectors from `vector`, **3D rasters from `grid3`**, which is
+why a `raster_3d=` parameter such as `g.region`'s is a dropdown of the mapset's voxel maps.
+`g.list type=raster3d` would give the same answer and cost a GRASS run. A space-time dataset is
+not a folder: it is a row in that mapset's own temporal database,
+`<mapset>/tgis/sqlite.db`. The plugin does not read that database directly — its schema is
+GRASS's business, not a thing to depend on — and asks GRASS instead:
+
+```
+t.list type=strds mapset=PERMANENT format=line
+```
+
+run in a `--tmp-mapset` that names the user's mapset with `mapset=`, so **the mapset the
+datasets live in is never locked** and the user's own session is left alone. `strds`, `stvds`
+and `str3ds` are each listed on demand, and only when the chosen module actually names one of
+them, which 27 of 1,195 modules do. A project with no temporal database simply has no dataset
+to offer: the field stays visible and says so, rather than the panel failing to open.
+
+Nothing about such a parameter is visible in `--help`: GRASS declares it `type="string"` like
+any other name. What marks it is the `<gisprompt>` in the module's interface description —
+`age="old" element="strds"` for a dataset it reads, `age="new"` for a map it writes — and that
+is what the bridge reads to decide which fields it can fill.
+
+## The two-minute cap
 
 RustGIS stops a plugin command after two minutes. The run therefore carries its own deadline and
 gives up with a readable reason instead of being killed with a half-written file behind it.
@@ -381,20 +508,18 @@ quietly ignored, and when a run does run out the message says how long it was gi
 
 That desktop ceiling, not the ABI, is now the reason raster work belongs in a crate rather than a
 plugin.
-`generate_manifest.py` prints what it had to leave out of each **tool**, and the mapper refuses
-what RustGIS would not take rather than offering something that cannot work: a raster parameter,
-a name with a digit in it (`v.gsflow.segments` has `width1`), a name the module declares twice
-(the same module declares four of them twice over), and a file the module writes although it
-declares it as one it reads (`v.rectify`'s `rmsfile`), since a file picker cannot name a file
-that does not exist yet. Reading all 1,204 forms takes 129 seconds here, 24 at a time.
 
 ## Watch out
 
 - **The region is not optional.** A freshly created GRASS project has a region of one cell at the
   origin. Run `v.voronoi` without setting it and GRASS says `Found 0 points/centroids`; a raster
   module would quietly write a single cell. Step 3 above exists because of that.
-- A run costs about ten seconds of project creation, import and export even for a dozen points,
-  because each module call builds its own database. A session-scoped mapset would amortise it.
+- **A run pays for the trip, not for the project.** Each module call builds its own throwaway
+  database, which sounds expensive and is not: measured here, project creation is **0.05 s** of a
+  roughly 3 s `r.slope.aspect` run. The rest is the export out of RustGIS, `r.in.gdal`, the
+  module and `r.out.gdal`, at about 0.2 s each. A session-scoped mapset would save the project
+  creation and the interpreter start — about 3 % — so it is not worth the state it would keep
+  (see `TODO.md`).
 - Several input maps, 3D (`r3.*`) data, imagery groups and the modules that take a base name and
   read the bands beside it are not run by Run Module; a raster reaches a command, never a tool.
   Their parameters still appear in the form, but a run would need a different bridge.
