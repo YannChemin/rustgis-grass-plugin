@@ -14,8 +14,9 @@ import os
 import pathlib
 import subprocess
 import sys
+import time
 
-from grass_bridge import interface, session
+from grass_bridge import interface, panel, session
 
 HERE = pathlib.Path(__file__).parent
 
@@ -72,12 +73,13 @@ PREFERRED = [
 #: Where GRASS keeps its own modules, and where a user's addons go.
 ADDON_DIR = "~/.grass8/addons/bin"
 
-#: The first RustGIS that has everything this manifest uses: panel trees and
-#: compact ribbon columns with nested menus (RustGIS 0.5.0), and tool `file`
-#: parameters and assistant skills (earlier). An older RustGIS refuses a tab
-#: that names a panel, so it is better to be refused with a reason than to
-#: load with half the plugin missing.
-MIN_RUSTGIS = "0.5.0"
+#: The first RustGIS that has everything this manifest uses. The panel's
+#: `form`, its `choice` dropdowns, its `pick`s and a command's own `timeout`
+#: all came after 0.5.0; a panel item kind an older RustGIS does not know is a
+#: hard manifest error ("panel item kind 'form' isn't text, checkbox, slider,
+#: button, tree"), so a 0.5.0 floor had the whole plugin refused rather than
+#: loaded with a widget missing. Better to be refused with a reason.
+MIN_RUSTGIS = "0.6.0"
 
 #: The most bands the panel's band slider reaches before raster.info narrows
 #: it to the chosen raster: enough for a hyperspectral cube.
@@ -93,6 +95,20 @@ SKILLS = ["grass"]
 #: GRASS's own defaults over the chosen layer, which is all a command (no
 #: form) can do, and only the modules the installation actually has become
 #: commands.
+#: The ribbon icon each curated menu's commands carry, so a column of small
+#: controls is read by its glyphs rather than by its labels alone.
+MENU_ICONS = {
+    "Terrain": "relief",
+    "Hydrology": "measure_area",
+    "Filters": "resample",
+    "Surfaces": "graduated",
+    "Sun": "brightness",
+    "Enhance": "contrast",
+    "Preprocess": "stretch",
+    "Detect": "classify",
+    "Geometry": "identity",
+}
+
 RASTER_COMMANDS = {
     "Terrain": [
         "r.slope.aspect",
@@ -174,11 +190,84 @@ def installed_modules(grass):
     return sorted(names)
 
 
-def read_all(modules, grass, workers=24):
+#: How many GRASS runs the form read keeps going at once. One module takes
+#: about a quarter of a second, so a thousand in turn would take an afternoon.
+READ_WORKERS = 24
+
+#: What a command that can honestly take hours declares as its `timeout`: a
+#: day, the most RustGIS allows. A download (t.in.era5) or r.watershed on a
+#: national DEM does not fit in the 120 seconds a command gets by default.
+#:
+#: It holds on the command line, in Python and in scripts only: the desktop
+#: app runs commands on its window's own thread and stops them at 120 seconds
+#: whatever the manifest says. Nothing tells the plugin which host it is in,
+#: so the run itself still keeps to 120 seconds unless the caller asks for
+#: more with the command's own `timeout` parameter.
+LONG_TIMEOUT = 86400
+
+#: The MetaMonitor slot this run reports into
+#: (https://github.com/YannChemin/MetaMonitor). One stable id, so running the
+#: generator again overwrites its slot instead of adding another.
+SLOT = "rustgis-grass-manifest"
+
+
+def slot_dir():
+    """Return MetaMonitor's spool folder, or None when there is none.
+
+    ``METAMONITOR_SPOOL`` overrides it; cron has no ``XDG_RUNTIME_DIR``, so
+    ``/run/user/<uid>`` is the fallback.
+    """
+    spool = os.environ.get("METAMONITOR_SPOOL")
+    if spool:
+        return pathlib.Path(spool)
+    run = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    base = pathlib.Path(run) / "metamonitor" / "slots"
+    return base if base.is_dir() else None
+
+
+def report(done, total, detail, state="running"):
+    """Say how far the read has got, in MetaMonitor's spool.
+
+    Reading 1,200 module forms takes minutes, which is long enough to look
+    stalled; this is the progress bar for it. The slot is written here rather
+    than through ``mmctl`` because this runs about once a second for the whole
+    read, and a subprocess each time would cost more than the reporting is
+    worth. Reporting must never break or slow the build, so every failure is
+    ignored and a machine without MetaMonitor is unaffected.
+
+    :param state: ``running``, ``done`` or ``failed``
+    """
+    base = slot_dir()
+    if not base:
+        return
+    slot = {
+        "name": "GRASS manifest",
+        "percent": round(100 * done / total, 1) if total else 0,
+        "detail": detail,
+        "state": state,
+        "pid": os.getpid(),
+    }
+    # MetaMonitor ignores dotfiles, so the temporary name is one; the rename
+    # is what makes the new contents visible, whole.
+    tmp = base / f".{SLOT}.{os.getpid()}"
+    try:
+        tmp.write_text(json.dumps(slot))
+        tmp.replace(base / SLOT)
+    except OSError:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+
+
+def read_all(modules, grass, workers=READ_WORKERS):
     """Read every module's interface description, several at a time.
 
     One module takes about a quarter of a second; a thousand of them in turn
-    would take an afternoon.
+    would take an afternoon. Even at 24 at a time it is a couple of minutes
+    (129 s for 1,204 modules, measured on the author's machine), so it reports
+    how far it has got, to the terminal and to MetaMonitor
+    (https://github.com/YannChemin/MetaMonitor).
 
     :return: ``({module: xml}, [name of each that could not be read])``
     """
@@ -190,12 +279,24 @@ def read_all(modules, grass, workers=24):
             return module, None
 
     docs, failed = {}, []
+    total, last = len(modules), 0.0
     with concurrent.futures.ThreadPoolExecutor(workers) as pool:
-        for module, xml in pool.map(read, modules):
+        for done, (module, xml) in enumerate(pool.map(read, modules), 1):
             if xml:
                 docs[module] = xml
             else:
                 failed.append(module)
+            # About one line and one slot write a second, not one per module.
+            now = time.monotonic()
+            if now - last >= 1.0 or done == total:
+                last = now
+                print(
+                    f"\r  {done}/{total} forms read ({100 * done // total}%)",
+                    end="" if done < total else "\n",
+                    flush=True,
+                )
+                report(done, total, f"{module} ({done}/{total})")
+    report(total, total, f"{len(docs)} forms read", state="done")
     return docs, failed
 
 
@@ -224,22 +325,28 @@ COMMANDS = [
         "id": "raster-slope",
         "label": "Slope",
         "help": "r.slope.aspect: the steepness of the chosen raster layer.",
-        "icon": "stats",
-        "params": "{} (the GRASS Raster panel chooses the layer and the unit)",
+        "icon": "relief",
+        "params": '{"timeout"?: seconds} (the GRASS GIS panel chooses the '
+        "layer and the unit)",
+        "timeout": LONG_TIMEOUT,
     },
     {
         "id": "raster-aspect",
         "label": "Aspect",
         "help": "r.slope.aspect: the direction each cell of the chosen raster faces.",
-        "icon": "stats",
-        "params": "{} (the GRASS Raster panel chooses the layer)",
+        "icon": "directions",
+        "params": '{"timeout"?: seconds} (the GRASS GIS panel chooses the layer)',
+        "timeout": LONG_TIMEOUT,
     },
     {
         "id": "raster-viewshed",
         "label": "Viewshed",
-        "help": "r.viewshed: what is visible from the centre of the map.",
-        "icon": "zoom_full",
-        "params": "{} (the GRASS Raster panel chooses the layer, the viewer's height and the range)",
+        "help": "r.viewshed: what is visible from the place picked on the map, "
+        "or from its centre when no viewpoint was picked.",
+        "icon": "explore",
+        "params": '{"timeout"?: seconds} (the GRASS GIS panel chooses the '
+        "layer, the viewpoint, the viewer's height and the range)",
+        "timeout": LONG_TIMEOUT,
     },
     {
         "id": "run-module",
@@ -248,18 +355,19 @@ COMMANDS = [
         "raster layer, with GRASS's own defaults. A module that needs no "
         "raster runs with the form's values in the GRASS mapset chosen under "
         "Projects and mapsets.",
-        "icon": "stats",
-        "params": "{} (the panel's trees choose the module, the layer and the mapset)",
+        "icon": "run",
+        "params": '{"module"?: "r.slope.aspect", "timeout"?: seconds} (without '
+        "them the panel's trees choose the module, the layer and the mapset)",
         # A download (t.in.era5) does not fit in the 120 seconds a command
         # normally gets.
-        "timeout": 86400,
+        "timeout": LONG_TIMEOUT,
     },
     {
         "id": "imagery-state",
         "label": "Imagery\nModules",
         "help": "Open the GRASS GIS panel with its module tree filtered to the "
         "imagery (i.*) modules, and list the ones Run Module can drive.",
-        "icon": "stats",
+        "icon": "bands",
         "params": "{} (the panel's mode tree shows the same filter)",
     },
     {
@@ -268,7 +376,7 @@ COMMANDS = [
         "help": "Open the GRASS GIS panel with its module tree filtered to the "
         "temporal (t.*) modules. None can run from one raster: they read a "
         "space-time dataset, so the panel's tree gives each one's reason.",
-        "icon": "stats",
+        "icon": "time_slider",
         "params": "{} (the panel's mode tree shows the same filter)",
     },
     {
@@ -276,7 +384,7 @@ COMMANDS = [
         "label": "All\nModules",
         "help": "Open the GRASS GIS panel with its module tree showing every "
         "installed module again.",
-        "icon": "stats",
+        "icon": "catalog",
         "params": "{} (the panel's mode tree shows the same filter)",
     },
     {
@@ -284,7 +392,7 @@ COMMANDS = [
         "label": "GRASS\nDatabase",
         "help": "Put the GRASS database GRASS itself uses into the browser, "
         "under Folders.",
-        "icon": "bookmark",
+        "icon": "add_folder",
         "params": "{}",
     },
     {
@@ -292,14 +400,14 @@ COMMANDS = [
         "label": "Add\nMap",
         "help": "Add the map chosen in the GRASS Data tree to this project, "
         "exported to a format RustGIS reads.",
-        "icon": "stats",
+        "icon": "add_data",
         "params": "{} (the panel's tree chooses the map)",
     },
     {
         "id": "data-browse",
         "label": "Browse\nMapset",
         "help": "List the maps of the mapset chosen in the GRASS Data tree.",
-        "icon": "zoom_full",
+        "icon": "catalog",
         "params": "{}",
     },
     {
@@ -307,37 +415,220 @@ COMMANDS = [
         "label": "Region =\nMap View",
         "help": "Set the Analysis Environment's extent to what the map shows, "
         "which becomes the computational region of every GRASS raster run.",
-        "icon": "zoom_full",
+        "icon": "zoom_box",
         "params": "{}",
+    },
+    {
+        "id": "region-box",
+        "label": "Region =\nBox",
+        "help": "Set the Analysis Environment's extent to a box drawn on the "
+        "map, which becomes the computational region of every GRASS raster "
+        "run. The panel's Region from a Box asks for the box.",
+        "icon": "measure_area",
+        "params": '{"panel": {"region-box": {"bbox": [w, s, e, n]}}}',
     },
     {
         "id": "region-full",
         "label": "Region =\nWhole Layer",
         "help": "Clear the Analysis Environment's extent, so a run covers the "
         "whole input raster.",
-        "icon": "zoom_world",
+        "icon": "zoom_full",
         "params": "{}",
+    },
+    {
+        "id": "panel-step",
+        "label": "Panel Step",
+        "help": "Show one step of the GRASS GIS panel: the GRASS project and "
+        "its maps, the map layer and the region, the terrain runs, or the "
+        "module catalogue. The panel's own dropdown sets it.",
+        "icon": "pane_right",
+        "params": '{"panel": {"step": "data|layer|terrain|modules"}}',
+    },
+    {
+        "id": "layer-pick",
+        "label": "Read Chosen Layer",
+        "help": "Describe the raster layer chosen in the GRASS GIS panel: its "
+        "source, its bands and the region a run would use. Answers nothing "
+        "else, so choosing a layer does not rebuild the module catalogue.",
+        "icon": "raster_layer",
+        "params": '{"panel": {"raster": "<layer id>"}}',
+    },
+    {
+        "id": "module-pick",
+        "label": "Read Chosen Module",
+        "help": "Describe the module chosen in the GRASS GIS panel and fill "
+        "its form. Answers neither tree, so choosing one of 1,177 modules "
+        "costs a few kilobytes instead of the whole catalogue.",
+        "icon": "toolbox",
+        "params": '{"panel": {"modules": "<branch>/<module>"}}',
     },
     {
         "id": "raster-state",
         "label": "Refresh\nRasters",
         "help": "List the map's raster layers in the GRASS Raster panel again.",
-        "icon": "bookmark",
+        "icon": "raster_layer",
         "params": "{}",
     },
 ]
 
+#: The ribbon menus the vector tools go into, in the order they are shown,
+#: with the icon each carries and the tools it holds by their manifest id.
+#:
+#: GRASS's own keywords put 64 tools into 27 menus, 20 of them holding a single
+#: tool and two of them differing only in case (LIDAR and Lidar): a ribbon
+#: column of menus that each open to one row. These nine group the same work by
+#: what it does. The keyword stays in each tool's `toolbox`, which is what the
+#: Tools pane and its search show, so nothing is lost.
+VECTOR_MENUS = [
+    (
+        "Overlay & clip",
+        "clip",
+        ["v.clip", "v.dissolve", "v.extract", "v.select", "v.overlay", "v.patch"],
+    ),
+    (
+        "Geometry",
+        "hull",
+        [
+            "v.hull",
+            "v.concave.hull",
+            "v.delaunay",
+            "v.voronoi",
+            "v.centerpoint",
+            "v.centroids",
+            "v.centerline",
+            "v.ellipse",
+            "v.fill.holes",
+            "v.parallel",
+            "v.drape",
+            "v.extrude",
+        ],
+    ),
+    (
+        "Points & lines",
+        "split",
+        ["v.to.points", "v.split", "v.segment", "v.explode", "v.type", "v.perturb"],
+    ),
+    (
+        "Proximity & sampling",
+        "near",
+        ["v.distance", "v.sample", "v.random", "v.kernel", "v.outlier", "v.boxplot"],
+    ),
+    (
+        "Network",
+        "directions",
+        [
+            "v.net",
+            "v.net.alloc",
+            "v.net.distance",
+            "v.net.path",
+            "v.net.salesman",
+            "v.net.steiner",
+            "v.isochrones",
+            "v.lrs.create",
+            "v.lrs.label",
+            "v.lrs.segment",
+            "v.gsflow.export",
+            "v.gsflow.gravres",
+            "v.gsflow.grid",
+            "v.gsflow.hruparams",
+            "v.gsflow.reaches",
+            "v.gsflow.segments",
+        ],
+    ),
+    (
+        "Point clouds & LIDAR",
+        "point_layer",
+        [
+            "v.decimate",
+            "v.lidar.correction",
+            "v.lidar.edgedetection",
+            "v.lidar.growing",
+            "v.lidar.mcc",
+            "v.cluster",
+        ],
+    ),
+    (
+        "Generalize & clean",
+        "simplify",
+        ["v.generalize", "v.build", "v.build.polylines", "v.clean"],
+    ),
+    (
+        "Transform & project",
+        "identity",
+        ["v.transform", "v.proj", "v.rectify", "v.surf.rst"],
+    ),
+    (
+        "Tables & import",
+        "table",
+        ["v.db.droprow", "v.category", "v.convert", "v.in.pygbif"],
+    ),
+]
+
+#: Where a tool this file does not name by module goes, by its GRASS keyword:
+#: another installation's addons still land in a themed menu rather than in one
+#: of their own.
+VECTOR_KEYWORDS = {
+    "clip": "Overlay & clip",
+    "dissolve": "Overlay & clip",
+    "extract": "Overlay & clip",
+    "buffer": "Overlay & clip",
+    "geometry": "Geometry",
+    "centroid": "Geometry",
+    "lines central": "Geometry",
+    "surface": "Geometry",
+    "graphics": "Points & lines",
+    "distance": "Proximity & sampling",
+    "sampling": "Proximity & sampling",
+    "kernel density": "Proximity & sampling",
+    "statistics": "Proximity & sampling",
+    "plot": "Proximity & sampling",
+    "network": "Network",
+    "linear reference system": "Network",
+    "stream network": "Network",
+    "lidar": "Point clouds & LIDAR",
+    "point cloud": "Point clouds & LIDAR",
+    "generalization": "Generalize & clean",
+    "topology": "Generalize & clean",
+    "transformation": "Transform & project",
+    "projection": "Transform & project",
+    "rectify": "Transform & project",
+    "attribute table": "Tables & import",
+    "category": "Tables & import",
+    "import": "Tables & import",
+    "export": "Tables & import",
+}
+
 #: The panel the raster commands take their parameters from. A command opens no
 #: dialog, so without a panel it could only ever run with fixed defaults.
+#:
+#: RustGIS draws a panel as one flat column with no sections, so everything
+#: GRASS needs came to 24 widgets and several screens of scrolling, four trees
+#: among them. The `step` dropdown and `grass_bridge.panel` turn that into four
+#: steps in the order the work is done -- project, layer and region, terrain,
+#: modules -- and every answer sets `visible` from the step, so at most eight
+#: widgets are drawn at once. The declaration order below is the order within a
+#: step, since the widgets of the other steps are filtered out before drawing.
 PANEL = {
     "title": "GRASS GIS",
     "icon": "stats",
-    "help": "Reach the GRASS database, find a module, and run the ones that "
-    "need only a raster in and one out on a raster layer of the map. The form "
-    "sets the chosen module's own parameters. The catalogue can show every "
-    "module, or only the imagery or temporal ones.",
+    "help": "Four steps, in the order the work is done: choose a GRASS project "
+    "and add its maps, choose the map layer and the computational region, run "
+    "the shaped terrain modules, then find any of the installed modules and "
+    "run it with its own form.",
     "state": "raster-state",
     "items": [
+        {
+            "kind": "choice",
+            "id": "step",
+            "label": "Step",
+            "help": "Which part of the panel is shown. The steps are in the "
+            "order GRASS needs them: a project before its maps, a layer and a "
+            "region before a module can run on them.",
+            "options": [{"id": step, "label": label} for step, label in panel.STEPS],
+            "default": panel.FIRST,
+            "command": "panel-step",
+        },
+        # 1. Project and data.
         {"kind": "text", "id": "gisdbase", "label": "GRASS database"},
         {
             "kind": "tree",
@@ -350,13 +641,17 @@ PANEL = {
         },
         {"kind": "button", "command": "data-add"},
         {"kind": "button", "command": "data-folder"},
+        # 2. Layer and region.
         {
             "kind": "tree",
             "id": "raster",
             "label": "Raster layer",
             "help": "The layer the module reads. Only raster layers are listed.",
             "search": True,
-            "command": "raster-state",
+            # layer-pick answers this layer's source, bands and region and
+            # nothing else: a layer choice used to rebuild all 1,424 catalogue
+            # nodes, 270 KB of JSON, for no change.
+            "command": "layer-pick",
         },
         {"kind": "text", "id": "source", "label": "Chosen layer"},
         {
@@ -385,6 +680,17 @@ PANEL = {
         {"kind": "button", "command": "region-view"},
         {"kind": "button", "command": "region-full"},
         {
+            "kind": "pick",
+            "id": "region-box",
+            "label": "Region from a Box",
+            "help": "Draw the computational region on the map. GRASS takes a "
+            "raster module's extent from the region, not from its input, so "
+            "this is the third way GRASS users expect to set it, beside the "
+            "map view and the whole layer.",
+            "shape": "box",
+            "command": "region-box",
+        },
+        {
             "kind": "slider",
             "id": "res",
             "label": "Cell size in the raster's own units (0: from the environment)",
@@ -396,6 +702,7 @@ PANEL = {
             "default": 0,
             "steps": True,
         },
+        # 3. Terrain: the three shaped runs and the parameters only they take.
         {
             "kind": "checkbox",
             "id": "percent",
@@ -426,15 +733,35 @@ PANEL = {
             "label": "Viewshed follows the curvature of the earth",
             "default": False,
         },
+        {
+            "kind": "pick",
+            "id": "viewpoint",
+            "label": "Viewpoint on the Map",
+            "help": "Where the viewer stands for Viewshed. RustGIS marks the "
+            "place on the map while the panel is open. Without one the "
+            "viewshed falls back to the centre of the map, as it always did, "
+            "and says so. It runs no command of its own: pick the place, then "
+            "press Viewshed.",
+            "shape": "point",
+        },
         {"kind": "button", "command": "raster-slope"},
         {"kind": "button", "command": "raster-aspect"},
         {"kind": "button", "command": "raster-viewshed"},
+        # 4. Modules.
         {
-            "kind": "tree",
-            "id": "mode",
+            "kind": "choice",
+            "id": "family",
             "label": "Catalogue",
             "help": "Which modules the tree below lists: every installed module, "
-            "the imagery (i.*) modules only, or the temporal (t.*) modules only.",
+            "the imagery (i.*) modules only, or the temporal (t.*) modules only. "
+            "This was a three-node tree; a dropdown is one line and says what is "
+            "chosen without being scrolled.",
+            "options": [
+                {"id": family, "label": label} for family, label, _ in panel.FAMILIES
+            ],
+            "default": panel.FAMILIES[0][0],
+            # Filtering the catalogue is the one panel choice that has to
+            # rebuild the module tree, so it asks for the whole state.
             "command": "raster-state",
         },
         {
@@ -445,14 +772,13 @@ PANEL = {
             "'Runs from here' lists the modules Run Module can drive on the "
             "chosen raster, or with their form in the mapset chosen under "
             "Projects and mapsets; 'All modules' lists every installed one with "
-            "the reason the others cannot run here; 'Recently run' returns to one. The "
-            "Catalogue tree above keeps all modules, or only the imagery or "
-            "temporal ones.",
+            "the reason the others cannot run here; 'Recently run' returns to one. "
+            "The Catalogue dropdown above keeps all modules, or only the imagery "
+            "or temporal ones.",
             "search": True,
-            # Choosing a module refreshes the details under this tree (and the
-            # chosen layer, which costs one raster.info) before Run Module is
-            # pressed, so a module that cannot run says why there and then.
-            "command": "raster-state",
+            # module-pick answers the details and the form only, so choosing a
+            # module does not send the tree it was chosen from back again.
+            "command": "module-pick",
         },
         {
             "kind": "text",
@@ -470,6 +796,8 @@ PANEL = {
             "passes the values the form holds.",
         },
         {"kind": "button", "command": "run-module"},
+        # Shown in every step: what the last run did has to be readable from
+        # wherever the user is.
         {"kind": "text", "id": "status", "label": "Last run"},
     ],
 }
@@ -507,9 +835,16 @@ def raster_commands(catalogue, planned=None):
                     )[:300]
                     + " Runs on the layer chosen in the GRASS GIS panel, with "
                     "the band and region the panel holds.",
-                    "icon": "stats",
-                    "params": "{} (the GRASS GIS panel chooses the layer, the "
-                    "band and the region)",
+                    "icon": MENU_ICONS.get(menu, "raster_layer"),
+                    "params": '{"timeout"?: seconds} (the GRASS GIS panel '
+                    "chooses the layer, the band and the region)",
+                    # r.watershed on a national DEM does not fit in the 120
+                    # seconds a command gets by default. This holds on the
+                    # command line, in Python and in scripts; the desktop app
+                    # stops a command at 120 seconds whatever the manifest
+                    # says, so the run keeps to 120 unless its own timeout
+                    # parameter asks for more.
+                    "timeout": LONG_TIMEOUT,
                 }
             )
             modules[cid] = module
@@ -524,7 +859,7 @@ def raster_commands(catalogue, planned=None):
 #: its own translations, and are left as GRASS wrote them.
 FRENCH = {
     "GRASS GIS Tools": "Outils GRASS GIS",
-    "Database": "Base de donnees",
+    "Data": "Donnees",
     "Region": "Region",
     "Raster": "Raster",
     "Imagery": "Imagerie",
@@ -536,6 +871,14 @@ FRENCH = {
     "Filters": "Filtres",
     "Surfaces": "Surfaces",
     "Sun": "Soleil",
+    "Overlay & clip": "Superposition et decoupe",
+    "Points & lines": "Points et lignes",
+    "Proximity & sampling": "Proximite et echantillonnage",
+    "Network": "Reseau",
+    "Point clouds & LIDAR": "Nuages de points et LIDAR",
+    "Generalize & clean": "Generalisation et nettoyage",
+    "Transform & project": "Transformation et projection",
+    "Tables & import": "Tables et import",
     "Enhance": "Rehaussement",
     "Preprocess": "Pretraitement",
     "Detect": "Detection",
@@ -553,7 +896,20 @@ FRENCH = {
     "Browse\nMapset": "Parcourir\nle jeu",
     "Region =\nMap View": "Region =\nvue",
     "Region =\nWhole Layer": "Region =\ncouche",
+    "Region =\nBox": "Region =\nboite",
+    "Region from a Box": "Region depuis une boite",
+    "Viewpoint on the Map": "Point de vue sur la carte",
     "Refresh\nRasters": "Actualiser\nles rasters",
+    "Panel Step": "Etape du panneau",
+    "Read Chosen Layer": "Lire la couche choisie",
+    "Read Chosen Module": "Lire le module choisi",
+    "Step": "Etape",
+    "1. Project & data": "1. Projet et donnees",
+    "2. Layer & region": "2. Couche et region",
+    "3. Terrain": "3. Relief",
+    "4. Modules": "4. Modules",
+    "Imagery only": "Imagerie seulement",
+    "Temporal only": "Temporel seulement",
     "GRASS database": "Base de donnees GRASS",
     "Projects and mapsets": "Projets et jeux de donnees",
     "Raster layer": "Couche raster",
@@ -611,7 +967,11 @@ def build():
     print(f"reading forms from GRASS {session.version(grass)} at {grass}")
 
     names = installed_modules(grass)
-    print(f"  {len(names)} modules installed; reading their forms...")
+    print(
+        f"  {len(names)} modules installed; reading their forms "
+        f"{READ_WORKERS} at a time. This takes a couple of minutes, now and "
+        "again after a GRASS upgrade."
+    )
     docs, failed = read_all(names, grass)
     print(f"  {len(docs)} read, {len(failed)} could not be")
 
@@ -742,7 +1102,7 @@ def build():
     manifest = {
         "id": "grass-vector",
         "name": "GRASS GIS Tools",
-        "version": "0.10.0",
+        "version": "0.11.0",
         "description": (
             "Runs GRASS GIS modules: vector modules as geoprocessing tools, and "
             "every installed module from a panel and a tab of its own. GRASS "
@@ -776,54 +1136,130 @@ def build():
         "unreadable": sorted(set(failed)),
         "toolsLeftOut": left_out,
     }
+    # The panel's steps decide which widget is drawn when, so a widget the
+    # steps do not mention would never be shown and a step naming one the
+    # panel does not have would hide nothing. Fail here rather than ship a
+    # panel with an unreachable widget in it.
+    declared = {item.get("id") or item.get("command") for item in PANEL["items"]}
+    stepped = panel.every_item()
+    if declared != stepped:
+        sys.exit(
+            "the panel's widgets and grass_bridge.panel's steps disagree: "
+            f"only in the panel {sorted(declared - stepped)}, "
+            f"only in the steps {sorted(stepped - declared)}"
+        )
+    _, unnamed = vector_menus(tools)
+    if unnamed:
+        print(
+            f"  WARNING: {len(unnamed)} vector tools are in the ribbon's More "
+            f"menu: neither VECTOR_MENUS nor VECTOR_KEYWORDS names them "
+            f"({', '.join(unnamed[:8])})"
+        )
     stale = check_i18n({k: v for k, v in manifest.items() if k != "i18n"})
     if stale:
         print(f"  WARNING: translations for text no longer in the manifest: {stale}")
     return manifest, catalogue_out
 
 
+def vector_menus(tools):
+    """Return the ribbon menus for the vector tools, and what was left over.
+
+    :data:`VECTOR_MENUS` names the tools by module; a tool the table does not
+    name goes by its GRASS keyword (:data:`VECTOR_KEYWORDS`), and one neither
+    names lands in "More" and is reported, so a new addon is never dropped in
+    silence.
+
+    :param tools: the manifest's tools
+    :return: ``([menu, ...], [tool id, ...])``, the second being the unnamed
+    """
+    by_id = {tool["id"]: tool for tool in tools}
+    placed, menus, unnamed = set(), [], []
+    extra = {}
+    for tool in tools:
+        if any(tool_id(m) == tool["id"] for _, _, mods in VECTOR_MENUS for m in mods):
+            continue
+        box = tool["toolbox"].split("\u203a")[-1].strip().lower()
+        label = VECTOR_KEYWORDS.get(box)
+        if label:
+            extra.setdefault(label, []).append(tool["id"])
+        else:
+            unnamed.append(tool["id"])
+    for label, icon, modules in VECTOR_MENUS:
+        items = [tool_id(m) for m in modules if tool_id(m) in by_id]
+        items += sorted(extra.get(label, []))
+        placed.update(items)
+        if not items:
+            continue
+        # A menu takes 32 items.
+        for start in range(0, len(items), 32):
+            part = items[start : start + 32]
+            name = label if len(items) <= 32 else f"{label} {start // 32 + 1}"
+            menus.append(
+                {
+                    "menu": name,
+                    "icon": icon,
+                    "items": [f"tool:{i}" for i in part],
+                }
+            )
+    if unnamed:
+        # Untranslated on purpose: it only appears for an addon neither table
+        # names, and a translation for a menu no manifest declares would be
+        # reported as dead weight on every build.
+        menus.append(
+            {
+                "menu": "More",
+                "icon": "toolbox",
+                "items": [f"tool:{i}" for i in sorted(unnamed)[:32]],
+            }
+        )
+    return menus, unnamed
+
+
 def tab(tools, raster_menus=None, imagery_menus=None):
     """Return the plugin's own ribbon tab.
 
-    A tab holds 8 groups and a small group 48 controls, so the vector tools and
-    the curated raster and imagery modules go into menus: one per toolbox,
-    which is one per GRASS keyword, and one per theme.
+    A tab holds 8 groups and a small group 48 controls. Seven groups in the
+    order the work is done, each entry with an icon of its own: the panel, the
+    GRASS database, the region, the terrain and raster modules, the imagery
+    modules, the vector tools in nine themed menus, and the module catalogue.
+
+    The panel is declared once, not in three groups; the three catalogue
+    filters are in a menu rather than on the top level, because they set what
+    the panel's tree lists instead of running anything.
     """
-    boxes = {}
-    for tool in tools:
-        boxes.setdefault(tool["toolbox"].split("›")[-1].strip(), []).append(tool)
-    menus = []
-    for box in sorted(boxes):
-        items = [
-            f"tool:{tool['id']}" for tool in sorted(boxes[box], key=lambda t: t["name"])
-        ]
-        # A menu takes 32 items; a bigger toolbox is split in two.
-        for start in range(0, len(items), 32):
-            part = items[start : start + 32]
-            label = box if len(items) <= 32 else f"{box} {start // 32 + 1}"
-            menus.append({"menu": label, "items": part})
+    menus, _ = vector_menus(tools)
     return {
         "label": "GRASS",
         "groups": [
+            {"label": "GRASS", "items": ["panel"]},
             {
-                "label": "Database",
+                "label": "Data",
                 "layout": "small",
                 "items": ["data-folder", "data-add", "data-browse"],
             },
             {
                 "label": "Region",
                 "layout": "small",
-                "items": ["region-view", "region-full", "raster-state"],
+                "items": [
+                    "region-view",
+                    "region-full",
+                    "region-box",
+                    "raster-state",
+                ],
             },
             {
-                "label": "Raster",
+                "label": "Terrain",
                 "layout": "small",
                 "items": [
                     "raster-slope",
                     "raster-aspect",
                     "raster-viewshed",
                     *(
-                        {"menu": menu, "items": items[:32]}
+                        {
+                            "menu": menu,
+                            "icon": MENU_ICONS.get(menu, "raster_layer"),
+                            "items": items[:32],
+                        }
                         for menu, items in sorted((raster_menus or {}).items())
                     ),
                 ],
@@ -832,24 +1268,29 @@ def tab(tools, raster_menus=None, imagery_menus=None):
                 "label": "Imagery",
                 "layout": "small",
                 "items": [
-                    "panel",
-                    "imagery-state",
                     *(
-                        {"menu": menu, "items": items[:32]}
+                        {
+                            "menu": menu,
+                            "icon": MENU_ICONS.get(menu, "bands"),
+                            "items": items[:32],
+                        }
                         for menu, items in sorted((imagery_menus or {}).items())
                     ),
-                ],
+                ]
+                or ["imagery-state"],
             },
             {"label": "Vector", "layout": "small", "items": menus[:48]},
             {
-                "label": "Temporal",
-                "layout": "small",
-                "items": ["panel", "temporal-state"],
-            },
-            {
                 "label": "Modules",
                 "layout": "small",
-                "items": ["panel", "all-state", "run-module"],
+                "items": [
+                    "run-module",
+                    {
+                        "menu": "Catalogue",
+                        "icon": "catalog",
+                        "items": ["all-state", "imagery-state", "temporal-state"],
+                    },
+                ],
             },
         ],
     }

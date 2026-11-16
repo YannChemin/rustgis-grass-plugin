@@ -31,7 +31,40 @@ TIMEOUT = 1800
 #: RustGIS stops a plugin command after this long (docs/plugins.md > The
 #: protocol). A command's run keeps inside it and says so, rather than being
 #: killed with a half-written file behind it.
+#:
+#: A command may declare a longer ``timeout`` in the manifest, but that only
+#: holds on the command line, in Python and in scripts: the desktop app runs
+#: commands on its window's own thread and stops them at 120 seconds whatever
+#: the manifest says. Nothing in the request or in ``host.info`` tells the
+#: plugin which host it is in, so this stays the default, and a caller that
+#: knows it is not the desktop raises it with the command's own ``timeout``
+#: parameter.
 COMMAND_LIMIT = 120
+
+#: The longest a caller may ask for with that parameter: what the manifest
+#: declares for these commands, a day, as a download or a national DEM needs.
+COMMAND_LIMIT_MAX = 86400
+
+
+def budget_asked(params, default=COMMAND_LIMIT):
+    """Return the seconds a command's own ``timeout`` parameter asks for.
+
+    :param params: the request's ``params``
+    :raises GrassError: when it is not a number of seconds in range, rather
+        than quietly running with a default the caller did not ask for
+    """
+    asked = (params or {}).get("timeout")
+    if asked is None:
+        return default
+    try:
+        seconds = float(asked)
+    except (TypeError, ValueError):
+        raise GrassError(f"timeout: {asked!r} is not a number of seconds") from None
+    if not 1 <= seconds <= COMMAND_LIMIT_MAX:
+        raise GrassError(
+            f"timeout: {seconds:g} seconds is outside 1 to {COMMAND_LIMIT_MAX}"
+        )
+    return seconds
 
 #: The widest or tallest a rendered picture may be, so a fine region does not
 #: produce a huge grid for what is only a picture of colours.
@@ -258,6 +291,8 @@ class Run:
         # When set, the moment (time.monotonic) by which every step must be
         # over: a command's whole run has to fit in what RustGIS allows it.
         self.deadline = deadline
+        # How long that was, for the message when it runs out.
+        self.budget = None
         self.dir = tempfile.mkdtemp(prefix="rustgis-grass-")
         self.messages = []
         # One entry per distinct warning, with how often GRASS said it: a
@@ -312,10 +347,14 @@ class Run:
             return TIMEOUT
         left = self.deadline - time.monotonic()
         if left <= 1.0:
+            # getattr, because a test or a subclass may set a deadline without
+            # going through __init__.
+            budget = getattr(self, "budget", None) or COMMAND_LIMIT
             raise GrassError(
-                f"the work did not fit in the {COMMAND_LIMIT} seconds RustGIS gives a "
-                "plugin command; run it on a smaller raster, or zoom in and export the "
-                "part you need"
+                f"the work did not fit in the {budget:g} seconds this run was given; "
+                "run it on a smaller raster, zoom in and export the part you need, "
+                "or, away from the desktop app, ask for longer with the command's "
+                "timeout parameter"
             )
         return left
 

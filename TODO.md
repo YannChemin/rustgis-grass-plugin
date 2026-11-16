@@ -388,6 +388,19 @@ pass. The README, the skill, this history, the changelog and the man page name
 the form, the 24 panel items and version `0.8.0`; the `.gitignore` exception and
 the README install line point at the `0.8.0` package.
 
+### DONE — The panel is four steps, and the tab is decluttered (0.11.0)
+
+RustGIS draws a panel as one flat column with no section, tab or accordion, so
+24 widgets with four trees in them was several screens of scrolling. A `step`
+dropdown and `grass_bridge/panel.py` make it four steps -- project and data,
+layer and region, terrain, modules -- with every answer setting each widget's
+`visible` from the step, so at most eleven of 25 are drawn. The ribbon went
+from 141 entries to 122 in seven groups, the 27 keyword-made vector menus (20
+of them holding one tool) to nine themed ones, and every command and menu
+carries an icon of its own. `minRustgisVersion` is 0.6.0, because the panel's
+`form` and `choice` items came after 0.5.0 and an unknown panel item kind is a
+hard manifest error. `UX_REFACTOR.md` is the survey this came from.
+
 ## Remaining work
 
 ### TODO — Run temporal modules from a space-time dataset
@@ -398,19 +411,58 @@ an STRDS, run the module and export its raster result; a one-map STRDS would
 make most `t.rast.*` operations trivial, and the plugin ABI has no space-time
 dataset kind. Design this before offering any `t.*` command.
 
-### TODO — Consider a lightweight `module-details` command
+### DONE — A lightweight command for each panel choice
 
-Selecting a module currently re-runs `raster-state`, which re-sends the full
-~1,300-node tree. A dedicated command could return only the details text and
-keep selection cheap, at the cost of one more command.
+Choosing a module re-ran `raster-state`, which rebuilt and sent all 1,424
+catalogue nodes, 270 KB of JSON, for a choice that cannot change them;
+choosing a layer did the same. `module-pick` answers the details, the form,
+the status and whether Run Module is worth pressing, and makes no host request
+at all; `layer-pick` answers the layer's source, bands, region and status.
+A tree's nodes are now sent only by the step that draws it
+(`grass_bridge/panel.py`), the raster tree excepted: it is one node per raster
+layer and a tree keeps a chosen value only while its nodes were last sent.
 
-### PARTLY DONE — The two-minute cap
+### DONE — Panel picks for the viewpoint and the region
 
-A command may now declare `"timeout"` in `plugin.json`; `run-module` asks for a
-day, so `t.in.era5` is not cut off. Raster runs still use the two-minute
-default, because they copy the whole layer through a temporary project: narrow
-the region first, or give the curated raster commands a longer timeout once
-their progress is reported.
+RustGIS 0.6.0's `pick` panel item asks for a point or a box on the map.
+**Viewpoint on the Map** (point, terrain step) is where `r.viewshed` looks
+from; it declares no command, so picking marks the place and the next Viewshed
+uses it, and the ribbon button still works with the panel closed because a run
+without a pick falls back to the centre of the map and says which it used.
+**Region from a Box** (box, layer step) runs the new `region-box` command,
+which sets the Analysis Environment's extent from the box's degrees; a box
+across the antimeridian or with no height is refused, since the extent is four
+increasing degrees. Verified on a 200x200 UTM 30N test DEM through
+`rustgis-cli`: two picked points gave 28,000 and 4,003 visible cells of 40,000.
+
+### TODO — A session plugin
+
+`"session": true` keeps one program running between commands, which would hold
+the parsed catalogue and one throwaway GISDBASE instead of paying about ten
+seconds of project creation per run, and would hear `layers` and `project`
+events. It cannot refresh its own panel: `plugin.panel` is `Effect::Reserved`
+and `user_only()` refuses every `plugin.*` id to a plugin, so an event can warm
+a cache but not redraw the pane. It must delete its GISDBASE when its input
+closes, or it leaves a `.gislock` behind. See `UX_REFACTOR.md` 3.5.
+
+### DONE — The two-minute cap, as far as the host allows
+
+Every raster command now declares `"timeout": 86400` in `plugin.json`, so the
+command line, Python and scripts no longer cut off `r.watershed` on a large
+DEM or a `t.in.era5` download.
+
+The desktop app is the part that cannot be fixed from here: it runs commands
+on its window's own thread and stops them at 120 seconds whatever the manifest
+says. Neither the request nor `host.info` tells the plugin which host it is in,
+so raising the run's own deadline would mean being killed mid-write on the
+desktop — the thing the deadline exists to prevent. The run therefore keeps to
+120 seconds unless the caller, who does know, passes `timeout` in the command's
+own parameters (`session.budget_asked`, 1 to 86,400 seconds, refused rather
+than ignored when it is neither). When a run does run out, the message says how
+long it was given and how to ask for more.
+
+A host flag in `host.info` would let the plugin choose for itself; that belongs
+upstream in RustGIS, not here.
 
 ### PARTLY DONE — Let the form make more modules runnable
 

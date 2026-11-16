@@ -526,10 +526,133 @@ behaves as before.
   `~/dev/RustGIS/crates/ui-egui/src/pluginpanel.rs`,
   `~/dev/RustGIS/crates/plugins/src/lib.rs`.
 
+## 2026-11-16 — The stepped panel and the decluttered tab (0.11.0)
+
+After a `git pull` of RustGIS (`03b0ddcd`, `version = "0.6.0"`, last tag
+`v0.5.0`), the panel and the ribbon were refactored around the order the work
+is done: a GRASS project first, then the map layers, then the GRASS tools.
+`UX_REFACTOR.md` holds the survey this came from; it carries the measurements
+and the two steps not taken yet (panel picks, a session plugin).
+
+### What the pull changed
+
+Everything the plugin's panel uses beyond trees landed after `v0.5.0`:
+`form` and the per-command `timeout` (`813c7cb2`), session plugins
+(`ae098d42`), `choice`/`date`/`range` (`4b510fb0`), richer `host.layers`
+(`c4ccb515`) and panel picks (`46e50434`).
+
+The manifest declared `minRustgisVersion: 0.5.0` while using `form`. At
+`v0.5.0`, `KINDS` is `["text", "checkbox", "slider", "button", "tree"]` and an
+unknown kind is a hard manifest error, so a released 0.5.0 refused the whole
+plugin rather than loading it without the form. The floor is `0.6.0` now.
+
+### What was wrong
+
+- The panel was 24 widgets in one flat column — RustGIS has no section, tab or
+  accordion — with four trees in it, each up to 320 px, and three unrelated
+  jobs interleaved.
+- Every panel click re-sent the catalogue: measured at **1,424 nodes, 270 KB of
+  JSON**, rebuilt for clicks that cannot change it (choosing a layer, moving
+  the band slider).
+- The tab held 141 entries. Vector alone had **27 menus, 20 of them holding a
+  single tool**, `LIDAR` and `Lidar` among them; `panel` was declared three
+  times; **32 of 38 commands used the `stats` icon** and the 64 tools and 27
+  menus declared none.
+
+### What was done
+
+- `grass_bridge/panel.py` (new) holds the four steps, which widget belongs to
+  which, and what an answer for a step carries. The generator and the protocol
+  loop share it, and `build()` fails if the panel's widgets and the steps
+  disagree.
+- A `step` dropdown drives `visible`: at most eleven of 25 widgets are drawn.
+  `panel_answer()` answers the visibility of the step a command leaves the
+  panel in; a command moves the panel only when its whole result lives in
+  another step (`data-browse`, the catalogue filters).
+- `layer-pick` and `module-pick` answer only what changed. `module-pick` makes
+  no host request at all. Trees are sent only by the step that draws them,
+  except the raster tree, which is small and whose value is only kept while its
+  nodes were last sent.
+- The `mode` tree became the `family` dropdown (`all`, `imagery`, `temporal`);
+  `mode_family` still reads the tree's `mode/` ids.
+- `run-module` is disabled for a module the panel cannot drive, `data-add`
+  until a map is chosen.
+- Seven ribbon groups (GRASS, Data, Region, Terrain, Imagery, Vector, Modules),
+  122 entries, nine themed vector menus from `VECTOR_MENUS` with a
+  `VECTOR_KEYWORDS` fallback and a reported `More` menu for anything neither
+  names; an icon on every command and menu.
+
+### Measured after
+
+- Panel items 27 (limit 32); at most 12 drawn at once.
+- Answers over the plugin's own protocol, against a 60-project database: panel
+  open 277 KB -> 18 KB (step 1) or 1.5 KB (steps 2 and 3); choosing a layer
+  277 KB -> 0.4 KB; choosing a module 277 KB -> 2.1 KB. The module step still
+  costs 277 KB, which is the catalogue it exists to show.
+- Tab 122 entries in 7 groups; 9 vector menus, none with one tool.
+- 41 commands, 64 tools, 1,193 modules in the catalogue.
+- `python3 -m pytest -q tests`: 142 passing.
+
+### The two picks
+
+RustGIS 0.6.0's `pick` panel item asks for a point or a box on the map.
+`viewpoint` (point, terrain step) is where `r.viewshed` looks from; it declares
+no command, so picking marks the place and the next Viewshed uses it. Without
+one the run falls back to the centre of the map as before, and `module_args`
+says which was used and where it landed in the raster's own projection.
+`region-box` (box, layer step) runs the new `region-box` command, which sets
+the Analysis Environment's extent from the box's degrees; a box across the
+antimeridian or with no height is refused, because the extent is four
+increasing degrees.
+
+Verified against a 200x200 UTM 30N test DEM through `rustgis-cli`: two
+different picked points gave 28,000 and 4,003 visible cells of 40,000, so the
+pick drives the result rather than the view.
+
+### The two-minute cap, as far as the host allows
+
+Every raster command declares `"timeout": 86400`, which fixes the command
+line, Python and scripts. The desktop app cannot be fixed from here: it keeps
+any command to 120 seconds whatever the manifest says, and neither the request
+nor `host.info` says which host the plugin is in, so raising the run's own
+deadline would mean being killed mid-write there. The run keeps to 120 seconds
+unless the caller passes `timeout` in the command's parameters
+(`session.budget_asked`, 1 to 86,400, refused rather than ignored otherwise),
+and a run that runs out says how long it was given. A host flag in
+`host.info` belongs upstream.
+
+### The first-run wait
+
+Generating the manifest reads one GRASS form per module and printed nothing
+for the whole wait, which reads as a hang. `read_all` now counts the forms as
+it reads them, about one line a second, and reports into the MetaMonitor slot
+`rustgis-grass-manifest` where `mmctl` is installed (missing or failing mmctl
+changes nothing). `rustgis-grass-setup` says what the wait is for before it
+starts, and the README and the man page carry the same warning.
+
+### Files changed
+
+- `grass_bridge/panel.py` — new: steps, visibility, node economy.
+- `grass_bridge/raster.py` — `MODE_FAMILIES` for the dropdown, `mode_nodes`
+  removed.
+- `main.py` — `panel_values`, `panel_answer`, `can_run`, `module_form`,
+  `layer_pick`, `module_pick`; `panel_state(req, family, step)`; every
+  command's answer through `panel_answer`.
+- `generate_manifest.py` — `MIN_RUSTGIS` 0.6.0, `MENU_ICONS`, `VECTOR_MENUS`,
+  `VECTOR_KEYWORDS`, `vector_menus()`, the stepped `PANEL`, the new `tab()`,
+  three new commands, icons, French, the panel/step check, version 0.11.0.
+- `bin/rustgis-grass-setup` — the first-run warning before the generator runs.
+- `tests/interface_test.py`, `tests/raster_test.py` — eleven new tests.
+- `UX_REFACTOR.md` (new), `README.md`, `skills/grass/SKILL.md`, `HISTORY.md`,
+  `TODO.md`, `debian/changelog`, `man/rustgis-grass-setup.1`, `.gitignore`.
+
 ## Possible next steps
 
 - Run temporal modules once space-time dataset handling is designed.
-- Consider a lighter `module-details` command so selecting a module does not
-  re-send the full tree.
-- Replace the two-minute command cap or amortise GRASS project creation for
-  larger rasters.
+- Panel picks: a point for `r.viewshed`, which still shoots from the centre of
+  the map, and a box for the computational region (`UX_REFACTOR.md` 3.2).
+- A session plugin (`"session": true`), which amortises the ~10 s of project
+  creation per run and keeps the catalogue parsed. It cannot refresh its own
+  panel: `plugin.panel` is reserved to the user (`UX_REFACTOR.md` 3.5).
+- `timeout` on the curated raster commands, for the command line and scripts;
+  the desktop app still stops a command at 120 seconds.

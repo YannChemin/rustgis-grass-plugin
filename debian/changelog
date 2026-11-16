@@ -1,3 +1,68 @@
+rustgis-grass-plugin (0.11.0) unstable; urgency=medium
+
+  * The panel is four steps instead of one column of 24 widgets. RustGIS draws
+    a panel as a flat list with no sections, so everything GRASS needs -- the
+    database, the layer and region, the terrain runs and the module catalogue,
+    four trees among them -- was several screens of scrolling. A Step dropdown
+    now chooses one of Project & data, Layer & region, Terrain and Modules, and
+    every answer sets each widget's visible from it, so at most eleven of the
+    25 widgets are drawn at once. The chosen layer, the region and Last run
+    stay visible wherever they are acted on.
+  * A step decides what an answer carries as well as what is drawn. The module
+    tree is 1,424 nodes and about 270 KB of JSON and a mapset's can be
+    thousands of maps, and RustGIS keeps what an answer leaves out, so each
+    tree is sent only by the step that draws it. Two new commands answer only
+    what changed: layer-pick for a layer choice (five widgets, no catalogue)
+    and module-pick for a module choice (three widgets, no host request).
+    panel-step shows a step. run-module now takes the module in the command's
+    own parameters ({"module": "r.slope.aspect"}), which is how a script runs
+    one without bringing the panel to its module step first.
+  * Run Module is disabled for a module the panel cannot drive, with the reason
+    in Chosen module, rather than failing after the click. Add Map is disabled
+    until a map rather than a project or a mapset is chosen.
+  * The Catalogue filter, a three-node tree in a 320 px scroll area, is a
+    dropdown; its values are now all, imagery and temporal, and the mode/ ids
+    of the tree it replaces are still read.
+  * The ribbon tab is 122 entries instead of 141, in seven groups: GRASS, Data,
+    Region, Terrain, Imagery, Vector and Modules. GRASS's own keywords had put
+    the 64 vector tools into 27 menus, 20 of them holding a single tool and two
+    of them (LIDAR and Lidar) differing only in case; they are nine themed
+    menus now, with the keyword kept as each tool's toolbox for the Tools pane
+    and its search. The panel was declared in three groups and is declared
+    once, and the three catalogue filters moved into a menu.
+  * Every command and menu carries an icon of its own. 32 of 38 commands had
+    the same stats icon and the 64 tools and 27 menus had none.
+  * minRustgisVersion is 0.6.0, not 0.5.0. The panel's form and choice items
+    came after 0.5.0 and a panel item kind an older RustGIS does not know is a
+    hard manifest error, so the 0.5.0 floor had the whole plugin refused rather
+    than loaded with a widget missing.
+  * Two panel picks, which RustGIS 0.6.0 added. Viewpoint on the Map is where
+    r.viewshed looks from: it ran from the centre of the map before, whatever
+    the user wanted. Without a pick it still falls back to the centre, and the
+    run says which it used and where that landed in the raster's own
+    projection. Region from a Box draws the computational region on the map,
+    the third way GRASS users expect to set it beside the map view and the
+    whole layer; its region-box command is also on the ribbon. A box drawn
+    across the antimeridian is refused, since the Analysis Environment's
+    extent is four increasing degrees.
+  * Every raster command declares a timeout of a day, so the command line,
+    Python and scripts no longer cut off r.watershed on a large DEM. The
+    desktop app still stops any command at 120 seconds whatever the manifest
+    says, and nothing tells the plugin which host it is in, so a run keeps to
+    120 seconds unless the caller passes timeout in the command's own
+    parameters (1 to 86400 seconds; anything else is refused, not ignored).
+    A run that runs out now says how long it was given.
+  * The first run says how long it will take and shows how far it has got.
+    Generating the manifest reads one GRASS form per module and printed
+    nothing for the whole wait; it now counts the forms as it reads them and
+    reports to MetaMonitor where mmctl is installed, and
+    rustgis-grass-setup, the README and the man page say what the wait is for
+    before it starts.
+  * The manifest's version is 0.11.0; its 27 panel items, 42 commands, 64 tools
+    and 7 ribbon groups.
+
+ -- Yann Chemin <dr.yann.chemin@gmail.com>  Mon, 16 Nov 2026 12:00:00 +0100
+
 rustgis-grass-plugin (0.10.0) unstable; urgency=medium
 
   * Display modules (d.*) now run from the panel: instead of drawing to a

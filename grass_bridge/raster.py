@@ -186,7 +186,7 @@ def raster_nodes(layers):
     ]
 
 
-def module_args(command, values, point=None):
+def module_args(command, values, point=None, picked=False):
     """Return the module's arguments, and what to say about them.
 
     The input raster is always ``src`` and the output always ``out``; the
@@ -196,6 +196,8 @@ def module_args(command, values, point=None):
     :param values: the panel's widget values
     :param point: the viewing position in the project's own coordinates,
         as ``(east, north)``
+    :param picked: whether that position was picked on the map rather than
+        taken from the centre of the view, which the notes say
     :return: ``(argv, [note, ...])``
     :raises session.GrassError: for a command with no operation, or a viewshed
         with nowhere to look from
@@ -238,8 +240,14 @@ def module_args(command, values, point=None):
     if values.get("curvature"):
         argv.append("-c")
         notes.append("The curvature of the earth is taken into account.")
+    where = (
+        "the place picked on the map"
+        if picked
+        else "the centre of the map, because no viewpoint was picked"
+    )
     notes.append(
-        f"The viewer stands {height:g} m above the ground at the centre of the map. "
+        f"The viewer stands {height:g} m above the ground at {where} "
+        f"({east:.6f}, {north:.6f} in the raster's own projection). "
         "Visible cells are 1 and invisible ones 0 (r.viewshed's -b)."
     )
     return argv, notes
@@ -249,8 +257,13 @@ def module_args(command, values, point=None):
 #: than one branch, so its id carries the branch and stays unique in the tree.
 NODE_PREFIXES = ("runs/", "all/", "recent/")
 
-#: The catalogue modes the panel's mode tree offers, and the family each keeps.
+#: The module family each option of the panel's Catalogue dropdown keeps. The
+#: ``mode/`` ids are the nodes of the tree that dropdown replaced: a script
+#: written against them is read rather than ignored.
 MODE_FAMILIES = {
+    "all": None,
+    "imagery": "Imagery",
+    "temporal": "Temporal",
     "mode/all": None,
     "mode/imagery": "Imagery",
     "mode/temporal": "Temporal",
@@ -258,28 +271,8 @@ MODE_FAMILIES = {
 
 
 def mode_family(mode):
-    """Return the family a mode tree node shows, or None for every module."""
+    """Return the family a Catalogue option keeps, or None for every module."""
     return MODE_FAMILIES.get(str(mode or ""), None)
-
-
-def mode_nodes(catalogue):
-    """Return the panel tree's catalogue modes, with how many modules each holds."""
-    counts = {}
-    for entry in catalogue:
-        counts[entry["family"]] = counts.get(entry["family"], 0) + 1
-    return [
-        {"id": "mode/all", "label": "All modules", "count": len(catalogue)},
-        {
-            "id": "mode/imagery",
-            "label": "Imagery",
-            "count": counts.get("Imagery", 0),
-        },
-        {
-            "id": "mode/temporal",
-            "label": "Temporal",
-            "count": counts.get("Temporal", 0),
-        },
-    ]
 
 #: How many modules the "Recently run" branch keeps.
 MAX_RECENT = 12
@@ -1014,16 +1007,22 @@ class RasterRun(session.Run):
         super().__init__(
             grass=grass, progress=progress, deadline=time.monotonic() + budget
         )
+        self.budget = budget
 
-    def raster_tool(self, command, source, target, values=None, centre=None, env=None):
+    def raster_tool(
+        self, command, source, target, values=None, centre=None, env=None, picked=False
+    ):
         """Run one raster module over a GeoTIFF and write another.
 
         :param command: the local command id, a key of :data:`OPERATIONS`
         :param source: the exported input GeoTIFF
         :param target: where to write the result
         :param values: the panel's widget values
-        :param centre: the map's centre as ``(longitude, latitude)``, for a
-            module that works from a point
+        :param centre: where a module that works from a point works from, as
+            ``(longitude, latitude)``: the place picked on the map, or the
+            centre of the view
+        :param picked: whether that place was picked rather than the centre of
+            the view, which the messages say
         :param env: RustGIS's Analysis Environment, as ``gp.env`` answers it:
             ``{"extent": [w, s, e, n], "cellSize": degrees}``
         :return: ``[message, ...]``
@@ -1061,9 +1060,9 @@ class RasterRun(session.Run):
 
         point = None
         if centre is not None and module == "r.viewshed":
-            point = self._project_point(project, centre, region)
+            point = self._project_point(project, centre, region, picked)
 
-        argv, notes = module_args(command, values, point)
+        argv, notes = module_args(command, values, point, picked)
         if narrowed and module == "r.slope.aspect":
             # Otherwise it puts the region back on the elevation map's own grid
             # and the region asked for is silently ignored.
@@ -1326,13 +1325,17 @@ class RasterRun(session.Run):
             )
         return box
 
-    def _project_point(self, project, centre, region):
-        """Return the map's centre in the project's coordinates.
+    def _project_point(self, project, centre, region, picked=False):
+        """Return a place in the project's coordinates.
 
         :param centre: ``(longitude, latitude)``
+        :param picked: whether it was picked on the map, which the errors say,
+            since what to do about a place outside the raster depends on how
+            it was chosen
         :raises session.GrassError: when it cannot be converted, or falls
             outside the raster
         """
+        what = "the viewpoint picked" if picked else "the centre of the map"
         lon, lat = centre
         out = self.exec(
             project, "m.proj", "-i", "-d", f"coordinates={lon},{lat}", "separator=comma"
@@ -1342,7 +1345,7 @@ class RasterRun(session.Run):
             east, north = float(parts[0]), float(parts[1])
         except (IndexError, ValueError) as e:
             raise session.GrassError(
-                f"cannot put the map's centre ({lon:.5f}, {lat:.5f}) into the raster's "
+                f"cannot put {what} ({lon:.5f}, {lat:.5f}) into the raster's "
                 f"projection: m.proj answered {out.strip()!r}"
             ) from e
         try:
@@ -1353,7 +1356,11 @@ class RasterRun(session.Run):
             inside = True
         if not inside:
             raise session.GrassError(
-                f"the centre of the map ({lon:.5f}, {lat:.5f}) is outside the raster; "
-                "move the map over it first"
+                f"{what} ({lon:.5f}, {lat:.5f}) is outside the raster; "
+                + (
+                    "pick a place on it"
+                    if picked
+                    else "move the map over it, or pick a viewpoint on it"
+                )
             )
         return east, north

@@ -10,6 +10,12 @@ commands instead, because a tool gets no raster and makes no host requests;
 a command asks RustGIS to export the layer and to add the result back (see
 grass_bridge/raster.py).
 
+The panel is four steps, not one column of 24 widgets: grass_bridge/panel.py
+holds which widget belongs to which step, and every command answers the
+visibility of the step it leaves the panel in. A step also decides what an
+answer carries, so choosing a layer no longer sends the 1,424-node module
+catalogue back with it.
+
 Progress goes to RustGIS as {"progress": ...} lines, and GRASS modules report
 their own percentages to MetaMonitor through its GRASS hook
 (https://github.com/YannChemin/MetaMonitor).
@@ -22,7 +28,7 @@ import os
 import pathlib
 import sys
 
-from grass_bridge import database, raster, session
+from grass_bridge import database, panel, raster, session
 
 HERE = pathlib.Path(__file__).parent
 
@@ -219,6 +225,39 @@ NOT_READABLE = (
 )
 
 
+def panel_values(req):
+    """Return the panel's widget values from a request.
+
+    RustGIS keeps them between calls and sends them with every request,
+    whatever ran the command.
+    """
+    return dict((req.get("panel") or {}).get("values") or {})
+
+
+def panel_answer(items=None, values=None, step=None):
+    """Return the ``panel`` part of an answer.
+
+    :param items: widget updates, ``{id: {...}}``
+    :param values: widget values to set
+    :param step: the step to leave the panel in, which answers the visibility
+        of every widget. Without one the visibility is left as it was, which
+        is what a command whose result is visible from wherever the user is
+        should do: jumping the panel to another step under the user is worse
+        than showing the result where they are.
+    """
+    merged = {name: dict(state) for name, state in (items or {}).items()}
+    out = {}
+    if step is not None:
+        for name, state in panel.visibility(step).items():
+            merged.setdefault(name, {}).update(state)
+        out["values"] = {**(values or {}), "step": step}
+    elif values:
+        out["values"] = dict(values)
+    if merged:
+        out["items"] = merged
+    return out
+
+
 def database_panel(chosen=None, notes=()):
     """Return the panel items describing the GRASS database.
 
@@ -246,7 +285,7 @@ def browse_database(req):
     is refreshed here too: choosing a mapset must show its maps without making
     the user choose the module a second time.
     """
-    values = (req.get("panel") or {}).get("values") or {}
+    values = panel_values(req)
     chosen = values.get("database")
     items = database_panel(chosen)
     catalogue = load_catalogue().get("catalogue") or []
@@ -263,7 +302,22 @@ def browse_database(req):
                 else raster.mapset_form(module, maps, mapset)
             )
         }
-    return {"panel": {"items": items, "values": {"database": chosen}}}
+    # A node is a project, a mapset or a map; only a map can be added, so the
+    # node is read here rather than with database.parse_node, which refuses
+    # anything but a map.
+    parts = str(chosen or "").split(database.SEP)
+    named = len(parts) == 4 and parts[0] in ("raster", "vector")
+    items["status"] = {
+        "text": f"{parts[3]}@{parts[2]}: press Add Map."
+        if named
+        else f"{'/'.join(parts[1:])}: choose a map in it."
+        if len(parts) > 2
+        else "Choose a project and a mapset."
+    }
+    items["data-add"] = {"enabled": named}
+    # Its whole answer is the database tree, which only this step draws, so a
+    # Browse Mapset pressed from the ribbon has to bring the panel here.
+    return {"panel": panel_answer(items, {"database": chosen}, "data")}
 
 
 def add_folder(req):
@@ -282,14 +336,19 @@ def add_folder(req):
     call("host.notify", {"text": f"{base} is in the browser, under Folders."})
     return {
         "folder": base,
-        "panel": {"items": database_panel()},
+        "panel": panel_answer(
+            {
+                **database_panel(),
+                "status": {"text": f"{base} is in the browser, under Folders."},
+            }
+        ),
         "messages": [f"{base} added to the browser's Folders.", NOT_READABLE],
     }
 
 
 def add_map(req):
     """Export the map chosen in the tree and add it to the project."""
-    values = (req.get("panel") or {}).get("values") or {}
+    values = panel_values(req)
     base = database.gisdbase()
     if not base:
         raise session.GrassError("no GRASS database was found")
@@ -311,7 +370,12 @@ def add_map(req):
     return {
         "layer": added,
         "messages": messages,
-        "panel": {"items": database_panel(values.get("database"))},
+        "panel": panel_answer(
+            {
+                **database_panel(values.get("database")),
+                "status": {"text": f"{name}@{mapset} added from {project}."},
+            }
+        ),
     }
 
 
@@ -432,22 +496,22 @@ def run_display_module(catalogue, entry, values):
         log(text)
     call("host.notify", {"text": f"{entry['module']}: {messages[0]}"})
     recent = raster.remember(entry["module"])
-    family = raster.mode_family(values.get("mode"))
+    family = raster.mode_family(values.get("family", values.get("mode")))
     nodes, tree_notes = raster.catalogue_tree(
         catalogue, entry["module"], recent, family=family
     )
     return {
         "layer": added,
         "messages": messages + tree_notes,
-        "panel": {
-            "items": {
+        "panel": panel_answer(
+            {
                 "modules": {"nodes": nodes},
                 "details": {"text": raster.module_details(entry)},
                 "form": {"fields": raster.render_form(entry, maps, mapset)},
                 "status": {"text": "\n".join(messages + tree_notes)},
                 **database_panel(values.get("database")),
             }
-        },
+        ),
     }
 
 
@@ -490,21 +554,21 @@ def run_module_in_mapset(catalogue, entry, values):
         log(text)
     call("host.notify", {"text": f"{entry['module']}: {messages[0]}"})
     recent = raster.remember(entry["module"])
-    family = raster.mode_family(values.get("mode"))
+    family = raster.mode_family(values.get("family", values.get("mode")))
     nodes, notes = raster.catalogue_tree(
         catalogue, entry["module"], recent, family=family
     )
     return {
         "messages": messages + notes,
-        "panel": {
-            "items": {
+        "panel": panel_answer(
+            {
                 "modules": {"nodes": nodes},
                 "details": {"text": raster.module_details(entry)},
                 "form": {"fields": raster.mapset_form(entry, maps, mapset)},
                 "status": {"text": "\n".join(messages + notes)},
                 **database_panel(values.get("database")),
             }
-        },
+        ),
     }
 
 
@@ -518,12 +582,20 @@ def run_module(req, module=None):
     and mapset chosen under Projects and mapsets, so what it writes outlives
     the run.
 
+    A script can name the module in the command's own parameters
+    (``{"module": "r.slope.aspect"}``) instead of the tree: RustGIS keeps a
+    tree's value only while that value was among the nodes last sent, and the
+    module tree is only sent by the step that draws it, so a run from the
+    command line would otherwise have to walk the panel there first.
+
     :param module: the GRASS module a curated command runs, or None to take
-        the one chosen in the tree
+        the one named in the request's parameters, or the one chosen in the
+        tree
     """
-    values = (req.get("panel") or {}).get("values") or {}
+    values = panel_values(req)
     catalogue = load_catalogue().get("catalogue") or []
-    entry = raster.entry_for(catalogue, module or values.get("modules"))
+    asked = (req.get("params") or {}).get("module")
+    entry = raster.entry_for(catalogue, module or asked or values.get("modules"))
     if not entry.get("runnable"):
         if entry.get("mapset_runnable"):
             return run_module_in_mapset(catalogue, entry, values)
@@ -542,8 +614,9 @@ def run_module(req, module=None):
 
     target = raster.output_path(name, entry["module"].replace(".", "-"))
     exported, source = export_source(name, values)[:2]
+    budget = session.budget_asked(req.get("params"))
     try:
-        with raster.RasterRun(progress=progress) as run:
+        with raster.RasterRun(progress=progress, budget=budget) as run:
             messages = run.free_module(entry["module"], argv, exported, target, env)
         messages += source
     finally:
@@ -558,21 +631,21 @@ def run_module(req, module=None):
         log(text)
     call("host.notify", {"text": f"{entry['module']}: {messages[0]}"})
     recent = raster.remember(entry["module"])
-    family = raster.mode_family(values.get("mode"))
+    family = raster.mode_family(values.get("family", values.get("mode")))
     nodes, notes = raster.catalogue_tree(
         catalogue, entry["module"], recent, family=family
     )
     return {
         "layer": added,
         "messages": messages + notes,
-        "panel": {
-            "items": {
+        "panel": panel_answer(
+            {
                 "modules": {"nodes": nodes},
                 "details": {"text": raster.module_details(entry)},
                 "form": {"fields": raster.form_of(entry)},
                 "status": {"text": "\n".join(messages)},
             }
-        },
+        ),
     }
 
 
@@ -589,18 +662,75 @@ def describe_region(env):
     return f"{where}\n{size}"
 
 
+def picked_point(values, name="viewpoint"):
+    """Return a pick's place as ``(longitude, latitude)``, or None.
+
+    A pick answers ``{"lon", "lat", "x", "y", "crs"}``; the degrees are taken,
+    because the bridge projects them into the raster's own system itself and a
+    pick keeps the coordinates of whatever map it was picked on.
+    """
+    place = (values or {}).get(name)
+    if not isinstance(place, dict):
+        return None
+    try:
+        return float(place["lon"]), float(place["lat"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def picked_box(values, name="region-box"):
+    """Return a box pick's ``[west, south, east, north]`` in degrees, or None.
+
+    :raises session.GrassError: for a box drawn across the antimeridian, whose
+        west is east of its east. RustGIS's Analysis Environment takes an
+        extent as four increasing degrees, so such a box has to be refused
+        rather than turned into an extent that means the rest of the world.
+    """
+    place = (values or {}).get(name)
+    if not isinstance(place, dict):
+        return None
+    box = place.get("bbox")
+    if not isinstance(box, list) or len(box) != 4:
+        return None
+    try:
+        west, south, east, north = (float(x) for x in box)
+    except (TypeError, ValueError):
+        return None
+    if west > east:
+        raise session.GrassError(
+            f"the box crosses the antimeridian ({west:.5f} to {east:.5f}); "
+            "draw one that does not, or set the region from the map view"
+        )
+    if south >= north:
+        raise session.GrassError(
+            f"the box has no height ({south:.5f} to {north:.5f}); draw a larger one"
+        )
+    return [west, south, east, north]
+
+
 def set_region(req, extent):
     """Set the Analysis Environment's extent and answer the panel.
 
     :param extent: ``"view"`` for the map view, or None for the whole layer
     """
     env = call("gp.env", {"extent": extent})
-    told = "the map view" if extent == "view" else "the whole layer"
+    told = (
+        "the map view"
+        if extent == "view"
+        else "the whole layer"
+        if extent is None
+        else "the box drawn on the map"
+    )
     text = describe_region(env)
     call("host.notify", {"text": f"Computational region: {told}."})
     return {
         "environment": env,
-        "panel": {"items": {"region": {"text": text}}},
+        "panel": panel_answer(
+            {
+                "region": {"text": text},
+                "status": {"text": f"Computational region: {told}.\n{text}"},
+            }
+        ),
     }
 
 
@@ -628,17 +758,31 @@ def run_raster_command(req):
     env = call("gp.env", {}) or {}
 
     target = raster.output_path(name, operation["suffix"])
-    centre = None
+    centre, picked = None, False
     if operation["module"] == "r.viewshed":
-        view = call("host.view") or {}
-        centre = tuple((view.get("center") or [None, None])[:2])
-        if centre[0] is None:
-            raise session.GrassError("RustGIS did not say where the map is centred")
+        # The panel's Viewpoint on the Map, when one was picked; otherwise the
+        # centre of the map, as before. Which was used is reported, so the
+        # viewshed never shoots from a place the user did not choose without
+        # saying so.
+        centre = picked_point(values)
+        picked = centre is not None
+        if centre is None:
+            view = call("host.view") or {}
+            centre = tuple((view.get("center") or [None, None])[:2])
+            if centre[0] is None:
+                raise session.GrassError(
+                    "RustGIS did not say where the map is centred, and no "
+                    "viewpoint was picked: press Viewpoint on the Map in the "
+                    "GRASS GIS panel and click the place"
+                )
 
     exported, source, info = export_source(name, values)
+    budget = session.budget_asked(req.get("params"))
     try:
-        with raster.RasterRun(progress=progress) as run:
-            messages = run.raster_tool(command, exported, target, values, centre, env)
+        with raster.RasterRun(progress=progress, budget=budget) as run:
+            messages = run.raster_tool(
+                command, exported, target, values, centre, env, picked=picked
+            )
         messages += source
     finally:
         try:
@@ -657,36 +801,49 @@ def run_raster_command(req):
     return {
         "layer": added,
         "messages": messages,
-        "panel": {
-            "values": {"raster": str(layer.get("id"))},
-            "items": {
+        "panel": panel_answer(
+            {
                 "raster": {"nodes": nodes},
                 "source": {"text": name},
                 "band": raster.band_slider(info),
                 "region": {"text": describe_region(env)},
                 "status": {"text": "\n".join(messages)},
             },
-        },
+            {"raster": str(layer.get("id"))},
+        ),
     }
 
 
-def panel_state(req, mode=None):
-    """Answer the panel's state when it is opened.
+def panel_state(req, family=None, step=None):
+    """Answer the panel's state, for the step it is in.
 
     It reads the map only, so it is no undo step.
 
-    :param mode: a mode tree node to show, such as ``mode/imagery``; without
-        one the mode the panel already had is kept
+    A step decides what the answer carries as well as what is drawn. The
+    module tree is 1,424 nodes and about 270 KB of JSON and a mapset's tree can
+    be thousands of maps, and RustGIS keeps what an answer leaves out, so a
+    tree is sent only by the step that draws it. The raster tree is small and
+    always sent: a tree keeps a chosen value only while its node is among the
+    ones last sent.
+
+    :param family: a module family to show (``imagery``, ``temporal``,
+        ``all``), which also moves the panel to the module step; without one
+        the family the panel already had is kept
+    :param step: the step to show; without one the step the panel is in
     """
     layers = call("host.layers") or []
     nodes = raster.raster_nodes(layers)
-    values = dict((req.get("panel") or {}).get("values") or {})
-    if mode is not None:
-        values["mode"] = mode
-    mode = values.get("mode")
-    if mode not in raster.MODE_FAMILIES:
-        mode = "mode/all"
-    family = raster.mode_family(mode)
+    values = panel_values(req)
+    if family is not None:
+        values["family"] = family
+        step = step or "modules"
+    # `mode` was the id of the tree this dropdown replaced; a script that
+    # still sends it is read rather than ignored.
+    family = raster.mode_family(values.get("family", values.get("mode")))
+    chosen_family = next(
+        (name for name, _, keeps in panel.FAMILIES if keeps == family), "all"
+    )
+    step = panel.step_of(step if step is not None else values.get("step"))
     chosen = values.get("raster")
     if chosen is not None and not any(n["id"] == str(chosen) for n in nodes):
         chosen = None
@@ -774,46 +931,133 @@ def panel_state(req, mode=None):
         and (chosen_module.get("mapset_runnable") or chosen_module.get("render_runnable"))
     ):
         status += " The map has no raster layer."
-    module_nodes, _ = raster.catalogue_tree(
-        catalogue,
-        values.get("modules"),
-        raster.read_recents(),
-        family=family,
+    items = {
+        "raster": {"nodes": nodes},
+        "source": {
+            "text": "\n".join([label] + raster.source_notes(info))
+            if label
+            else "No raster chosen"
+        },
+        "band": raster.band_slider(info),
+        "region": {"text": describe_region(env)},
+        "status": {"text": status},
+        "details": {"text": raster.module_details(chosen_module)},
+        "form": {"fields": module_form(chosen_module, render_maps, render_mapset)},
+        "run-module": {"enabled": can_run(chosen_module)},
+    }
+    shown = {"family": chosen_family}
+    if chosen:
+        shown["raster"] = chosen
+    if panel.sends_nodes(step, "modules"):
+        module_nodes, _ = raster.catalogue_tree(
+            catalogue,
+            values.get("modules"),
+            raster.read_recents(),
+            family=family,
+        )
+        items["modules"] = {"nodes": module_nodes}
+    if panel.sends_nodes(step, "database"):
+        # Reading the database is a file-system walk; the step that draws it is
+        # the only one that needs it.
+        items.update(database_panel(values.get("database")))
+    return {"panel": panel_answer(items, shown, step)}
+
+
+def can_run(entry):
+    """Say whether Run Module can drive this module at all.
+
+    A module it cannot drive keeps its reason in Chosen module; the button is
+    disabled rather than failing after the click.
+    """
+    return bool(
+        entry
+        and (
+            entry.get("runnable")
+            or entry.get("mapset_runnable")
+            or entry.get("render_runnable")
+        )
     )
-    shown = {"raster": chosen} if chosen else {}
-    shown["mode"] = mode
+
+
+def module_form(entry, maps=(), mapset=""):
+    """Return the form fields of the chosen module, whatever kind it is."""
+    if not entry:
+        return raster.form_of(entry)
+    if entry.get("render_runnable"):
+        return raster.render_form(entry, list(maps), mapset)
+    if entry.get("mapset_inputs"):
+        return raster.mapset_form(entry, list(maps), mapset)
+    return raster.form_of(entry)
+
+
+def layer_pick(req):
+    """Describe the raster layer chosen in the panel, and nothing else.
+
+    The raster tree used to ask for the whole state, which rebuilt and sent
+    all 1,424 catalogue nodes for a choice that cannot change them. This
+    answers the four widgets a layer choice does change.
+    """
+    values = panel_values(req)
+    layers = call("host.layers") or []
+    nodes = raster.raster_nodes(layers)
+    chosen = str(values.get("raster") or "")
+    label = next((n["label"] for n in nodes if n["id"] == chosen), None)
+    try:
+        info = call("raster.info", {"layer": label}) if label else {}
+    except session.GrassError as e:
+        info = {}
+        log(f"raster.info: {e}")
+    env = call("gp.env", {}) or {}
+    notes = raster.source_notes(info)
+    items = {
+        "raster": {"nodes": nodes},
+        "source": {
+            "text": "\n".join([label] + notes) if label else "No raster chosen"
+        },
+        "band": raster.band_slider(info),
+        "region": {"text": describe_region(env)},
+        "status": {
+            "text": f"{label}: ready to run." if label else "No raster chosen."
+        },
+    }
+    values = {"raster": chosen} if label else {}
+    return {"panel": panel_answer(items, values)}
+
+
+def module_pick(req):
+    """Describe the module chosen in the panel, and fill its form.
+
+    Neither tree is answered, so choosing one of 1,177 modules costs a few
+    kilobytes rather than the catalogue it was chosen from.
+    """
+    values = panel_values(req)
+    catalogue = load_catalogue().get("catalogue") or []
+    entry = raster.entry_for(catalogue, values.get("modules"), quietly=True)
+    maps, mapset = [], ""
+    if entry and (entry.get("render_runnable") or entry.get("mapset_inputs")):
+        base = database.gisdbase()
+        target = database.chosen_mapset(base, values.get("database")) if base else None
+        if target:
+            mapset = target[1]
+            maps = database.maps(base, *target)
+    status = (
+        f"{entry['module']}: press Run Module."
+        if entry and entry.get("runnable")
+        else f"{entry['module']}: {entry.get('reason') or 'see Chosen module'}."
+        if entry
+        else "Choose a module in the tree."
+    )
     return {
-        "panel": {
-            "values": shown,
-            "items": {
-                "raster": {"nodes": nodes},
-                "source": {
-                    "text": "\n".join([label] + raster.source_notes(info))
-                    if label
-                    else "No raster chosen"
-                },
-                "band": raster.band_slider(info),
-                "region": {"text": describe_region(env)},
+        "panel": panel_answer(
+            {
+                "details": {"text": raster.module_details(entry)},
+                "form": {"fields": module_form(entry, maps, mapset)},
                 "status": {"text": status},
-                "mode": {"nodes": raster.mode_nodes(catalogue)},
-                "modules": {"nodes": module_nodes},
-                "details": {"text": raster.module_details(chosen_module)},
-                "form": {
-                    "fields": (
-                        raster.render_form(
-                            chosen_module, render_maps, render_mapset
-                        )
-                        if chosen_module and chosen_module.get("render_runnable")
-                        else raster.mapset_form(
-                            chosen_module, render_maps, render_mapset
-                        )
-                        if chosen_module and chosen_module.get("mapset_inputs")
-                        else raster.form_of(chosen_module)
-                    )
-                },
-                **database_panel(values.get("database")),
-            },
-        }
+                # Run Module is only worth pressing for a module this panel can
+                # drive; the reason for the others is in Chosen module.
+                "run-module": {"enabled": can_run(entry)},
+            }
+        )
     }
 
 
@@ -822,12 +1066,18 @@ def run_command(req):
     command = req.get("id")
     if command == "raster-state":
         return panel_state(req)
+    if command == "panel-step":
+        return panel_state(req)
+    if command == "layer-pick":
+        return layer_pick(req)
+    if command == "module-pick":
+        return module_pick(req)
     if command == "imagery-state":
-        return panel_state(req, "mode/imagery")
+        return panel_state(req, "imagery")
     if command == "temporal-state":
-        return panel_state(req, "mode/temporal")
+        return panel_state(req, "temporal")
     if command == "all-state":
-        return panel_state(req, "mode/all")
+        return panel_state(req, "all")
     if command == "run-module":
         return run_module(req)
     module = load_raster_commands().get(command)
@@ -843,6 +1093,14 @@ def run_command(req):
         return set_region(req, "view")
     if command == "region-full":
         return set_region(req, None)
+    if command == "region-box":
+        box = picked_box(panel_values(req))
+        if box is None:
+            raise session.GrassError(
+                "no box has been drawn: press Region from a Box in the GRASS "
+                "GIS panel, then drag one on the map"
+            )
+        return set_region(req, box)
     if command in raster.OPERATIONS:
         return run_raster_command(req)
     raise ValueError(f"unknown command '{command}'")

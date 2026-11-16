@@ -763,7 +763,7 @@ def test_the_panel_renders_a_display_module_from_the_chosen_mapset(
             "raster": "1",
             "database": "mapset/P/PERMANENT",
             "form": {"map": "Roads", "color": "red"},
-            "mode": "mode/all",
+            "family": "all",
         },
     )
     assert seen["base"] == str(base)
@@ -1079,14 +1079,14 @@ def test_the_panel_keeps_an_imagery_mode_and_filters_the_module_tree(monkeypatch
     monkeypatch.setattr(main, "call", fake_call)
     state = main.panel_state(
         {"panel": {"values": {"raster": "1", "modules": "all/i.edge"}}},
-        "mode/imagery",
+        "imagery",
     )
-    assert state["panel"]["values"]["mode"] == "mode/imagery"
-    assert state["panel"]["items"]["mode"]["nodes"] == [
-        {"id": "mode/all", "label": "All modules", "count": 1},
-        {"id": "mode/imagery", "label": "Imagery", "count": 1},
-        {"id": "mode/temporal", "label": "Temporal", "count": 0},
-    ]
+    assert state["panel"]["values"]["family"] == "imagery"
+    # A family is only chosen to look through the catalogue, so the panel goes
+    # to the step that draws it.
+    assert state["panel"]["values"]["step"] == "modules"
+    assert state["panel"]["items"]["modules"]["visible"] is True
+    assert state["panel"]["items"]["database"]["visible"] is False
     assert (
         state["panel"]["items"]["modules"]["nodes"][1]["label"]
         == "All imagery modules (1)"
@@ -1104,7 +1104,237 @@ def test_the_temporal_state_command_opens_the_temporal_mode(monkeypatch):
     monkeypatch.setattr(
         main,
         "panel_state",
-        lambda req, mode=None: seen.append(mode) or {"panel": {}},
+        lambda req, family=None, step=None: seen.append(family) or {"panel": {}},
     )
     assert main.run_command({"id": "temporal-state"}) == {"panel": {}}
-    assert seen == ["mode/temporal"]
+    assert seen == ["temporal"]
+
+
+def test_a_step_draws_its_own_widgets_and_hides_the_others():
+    from grass_bridge import panel
+
+    for step, _ in panel.STEPS:
+        shown = {
+            name
+            for name, state in panel.visibility(step).items()
+            if state["visible"]
+        }
+        assert shown == set(panel.ALWAYS) | set(panel.STEP_ITEMS[step])
+        # The panel's whole point is that a step is a screenful, not a column.
+        assert len(shown) <= 12
+    # Every widget belongs to a step, and the two that are always drawn are
+    # the step chooser and the line saying what the last run did.
+    assert set(panel.ALWAYS) == {"step", "status"}
+    assert panel.step_of("no-such-step") == panel.FIRST
+    assert panel.step_of("modules") == "modules"
+
+
+def test_only_the_step_that_draws_a_tree_pays_for_its_nodes():
+    from grass_bridge import panel
+
+    # The module tree is 1,424 nodes and about 270 KB of JSON, and a mapset's
+    # can be thousands of maps; the raster tree is one node per raster layer
+    # and a tree keeps a chosen value only while its node was last sent.
+    assert panel.sends_nodes("modules", "modules") is True
+    assert panel.sends_nodes("layer", "modules") is False
+    assert panel.sends_nodes("data", "database") is True
+    assert panel.sends_nodes("modules", "database") is False
+    for step, _ in panel.STEPS:
+        assert panel.sends_nodes(step, "raster") is True
+
+
+def test_choosing_a_layer_answers_the_layer_and_not_the_catalogue(monkeypatch):
+    import main
+
+    asked = []
+
+    def fake_call(op, params=None):
+        asked.append(op)
+        if op == "host.layers":
+            return [{"id": 1, "name": "dem", "raster": True, "active": True}]
+        if op == "raster.info":
+            return {"crs": "EPSG:2154", "bands": [{"name": "elevation"}]}
+        return {}
+
+    monkeypatch.setattr(main, "call", fake_call)
+    monkeypatch.setattr(
+        main, "load_catalogue", lambda: pytest.fail("the catalogue was read")
+    )
+    answer = main.layer_pick({"panel": {"values": {"raster": "1"}}})
+    items = answer["panel"]["items"]
+    assert set(items) == {"raster", "source", "band", "region", "status"}
+    assert "modules" not in items
+    assert items["source"]["text"].startswith("dem")
+    assert answer["panel"]["values"] == {"raster": "1"}
+    # It must not move the panel either: the user chose a layer, not a step.
+    assert "step" not in answer["panel"].get("values", {})
+    assert asked == ["host.layers", "raster.info", "gp.env"]
+
+
+def test_choosing_a_module_answers_the_details_and_the_form_only(monkeypatch):
+    import main
+
+    catalogue = [
+        {
+            "module": "r.slope.aspect",
+            "family": "Raster",
+            "summary": "",
+            "keywords": "",
+            "raster_in": ["elevation"],
+            "raster_out": ["slope"],
+            "raster_input": "elevation",
+            "raster_output": "slope",
+            "runnable": True,
+            "reason": "",
+            "needs": [],
+            "bands": False,
+            "temporal": False,
+            "form": [{"id": "zscale", "kind": "text"}],
+        }
+    ]
+    monkeypatch.setattr(main, "load_catalogue", lambda: {"catalogue": catalogue})
+    monkeypatch.setattr(
+        main, "call", lambda op, params=None: pytest.fail(f"host request {op}")
+    )
+    answer = main.module_pick(
+        {"panel": {"values": {"modules": "runs/r.slope.aspect"}}}
+    )
+    items = answer["panel"]["items"]
+    assert set(items) == {"details", "form", "status", "run-module"}
+    assert items["form"]["fields"] == [{"id": "zscale", "kind": "text"}]
+    assert items["run-module"]["enabled"] is True
+    assert "r.slope.aspect" in items["status"]["text"]
+
+
+def test_run_module_is_disabled_for_a_module_the_panel_cannot_drive(monkeypatch):
+    import main
+
+    catalogue = [
+        {
+            "module": "r.patch",
+            "family": "Raster",
+            "summary": "",
+            "keywords": "",
+            "raster_in": ["input"],
+            "raster_out": ["output"],
+            "raster_input": "input",
+            "raster_output": "output",
+            "runnable": False,
+            "reason": "needs several rasters",
+            "mapset_runnable": False,
+            "render_runnable": False,
+            "needs": [],
+            "bands": False,
+            "temporal": False,
+            "form": [],
+        }
+    ]
+    monkeypatch.setattr(main, "load_catalogue", lambda: {"catalogue": catalogue})
+    monkeypatch.setattr(main, "call", lambda op, params=None: {})
+    answer = main.module_pick({"panel": {"values": {"modules": "all/r.patch"}}})
+    assert answer["panel"]["items"]["run-module"]["enabled"] is False
+    assert "needs several rasters" in answer["panel"]["items"]["status"]["text"]
+
+
+def test_run_module_takes_its_module_from_the_commands_parameters(monkeypatch):
+    import main
+
+    # A tree keeps a value only while that value was among the nodes last
+    # sent, and the module tree is sent only by the step that draws it, so a
+    # script names the module instead of walking the panel there.
+    catalogue = [
+        {
+            "module": "r.slope.aspect",
+            "family": "Raster",
+            "summary": "",
+            "keywords": "",
+            "raster_in": ["elevation"],
+            "raster_out": ["slope"],
+            "raster_input": "elevation",
+            "raster_output": "slope",
+            "runnable": False,
+            "reason": "not runnable in this test",
+            "mapset_runnable": False,
+            "render_runnable": False,
+            "needs": [],
+            "bands": False,
+            "temporal": False,
+            "form": [],
+        }
+    ]
+    monkeypatch.setattr(main, "load_catalogue", lambda: {"catalogue": catalogue})
+    with pytest.raises(main.session.GrassError) as raised:
+        main.run_module(
+            {
+                "id": "run-module",
+                "params": {"module": "r.slope.aspect"},
+                "panel": {"values": {}},
+            }
+        )
+    # It reached that module from the parameters alone, with nothing chosen.
+    assert "r.slope.aspect cannot be run" in str(raised.value)
+
+
+def test_a_picked_viewpoint_is_read_as_degrees():
+    import main
+
+    place = {
+        "lon": -1.55,
+        "lat": 47.21,
+        "x": -172_571.0,
+        "y": 5_975_000.0,
+        "crs": "EPSG:3857",
+    }
+    # The degrees, not the map coordinates: the bridge projects them into the
+    # raster's own system itself, and a pick keeps the coordinates of whatever
+    # map it was picked on.
+    assert main.picked_point({"viewpoint": place}) == (-1.55, 47.21)
+    assert main.picked_point({"viewpoint": None}) is None
+    assert main.picked_point({}) is None
+    assert main.picked_point({"viewpoint": {"lon": "x", "lat": 1}}) is None
+
+
+def test_a_picked_box_becomes_an_extent_and_a_wrapped_one_is_refused():
+    import main
+
+    place = {"bbox": [-2.0, 47.0, -1.0, 48.0], "extent": [1, 2, 3, 4], "crs": "EPSG:3857"}
+    assert main.picked_box({"region-box": place}) == [-2.0, 47.0, -1.0, 48.0]
+    assert main.picked_box({}) is None
+    assert main.picked_box({"region-box": {"bbox": [1, 2]}}) is None
+    # gp.env takes four increasing degrees, so a box drawn across the
+    # antimeridian cannot be turned into an extent without meaning the rest of
+    # the world instead.
+    with pytest.raises(main.session.GrassError) as raised:
+        main.picked_box({"region-box": {"bbox": [179.0, 47.0, -179.0, 48.0]}})
+    assert "antimeridian" in str(raised.value)
+    with pytest.raises(main.session.GrassError):
+        main.picked_box({"region-box": {"bbox": [-2.0, 48.0, -1.0, 48.0]}})
+
+
+def test_the_region_box_command_sets_the_extent_it_was_given(monkeypatch):
+    import main
+
+    seen = []
+
+    def fake_call(op, params=None):
+        seen.append((op, params))
+        return {"extent": [-2.0, 47.0, -1.0, 48.0]}
+
+    monkeypatch.setattr(main, "call", fake_call)
+    answer = main.run_command(
+        {
+            "id": "region-box",
+            "panel": {"values": {"region-box": {"bbox": [-2.0, 47.0, -1.0, 48.0]}}},
+        }
+    )
+    assert ("gp.env", {"extent": [-2.0, 47.0, -1.0, 48.0]}) in seen
+    assert "box drawn on the map" in answer["panel"]["items"]["status"]["text"]
+
+
+def test_the_region_box_command_says_when_no_box_was_drawn(monkeypatch):
+    import main
+
+    monkeypatch.setattr(main, "call", lambda op, params=None: {})
+    with pytest.raises(main.session.GrassError) as raised:
+        main.run_command({"id": "region-box", "panel": {"values": {}}})
+    assert "no box has been drawn" in str(raised.value)

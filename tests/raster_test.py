@@ -491,21 +491,15 @@ def test_the_module_tree_keeps_only_temporal_modules_in_its_mode():
     assert recent["children"] == []
 
 
-def test_the_mode_tree_names_the_families_and_their_sizes():
-    catalogue = [
-        entry("r.slope.aspect"),
-        entry("i.edge", "Imagery"),
-        entry("i.pca", "Imagery", False, reason="needs several bands"),
-    ]
-    assert raster.mode_nodes(catalogue) == [
-        {"id": "mode/all", "label": "All modules", "count": 3},
-        {"id": "mode/imagery", "label": "Imagery", "count": 2},
-        {"id": "mode/temporal", "label": "Temporal", "count": 0},
-    ]
+def test_the_catalogue_dropdown_names_a_family_and_the_old_tree_ids_still_read():
+    assert raster.mode_family("imagery") == "Imagery"
+    assert raster.mode_family("temporal") == "Temporal"
+    assert raster.mode_family("all") is None
+    assert raster.mode_family("no-such-family") is None
+    # The ids of the three-node tree the dropdown replaced.
     assert raster.mode_family("mode/imagery") == "Imagery"
     assert raster.mode_family("mode/temporal") == "Temporal"
     assert raster.mode_family("mode/all") is None
-    assert raster.mode_family("mode/no-such-mode") is None
 
 
 def test_the_recent_branch_is_present_before_anything_has_run():
@@ -986,3 +980,38 @@ def test_a_render_form_offers_a_none_for_an_optional_input():
     by = {field["id"]: field for field in fields}
     assert by["map"]["choices"] == ["none", "DEM"]
     assert by["map"]["default"] == "none"
+
+
+def test_a_viewshed_says_whether_the_viewpoint_was_picked_or_assumed():
+    _, picked = raster.module_args(
+        "raster-viewshed", {"height": 2}, (500.0, 4000.0), picked=True
+    )
+    assert any("the place picked on the map" in note for note in picked)
+    assert any("500.000000, 4000.000000" in note for note in picked)
+    _, assumed = raster.module_args("raster-viewshed", {"height": 2}, (500.0, 4000.0))
+    # Falling back to the centre of the map is the old behaviour; it is kept,
+    # but never silently.
+    assert any("no viewpoint was picked" in note for note in assumed)
+
+
+def test_a_run_keeps_to_two_minutes_unless_the_caller_asks_for_longer():
+    # The desktop app stops a command at 120 seconds whatever the manifest
+    # declares, and nothing tells the plugin which host it is in, so the
+    # default has to stay 120 and a longer one has to be asked for.
+    assert session.budget_asked(None) == session.COMMAND_LIMIT
+    assert session.budget_asked({}) == session.COMMAND_LIMIT
+    assert session.budget_asked({"timeout": 3600}) == 3600
+    assert session.budget_asked({"timeout": "90"}) == 90
+    for bad in ({"timeout": "soon"}, {"timeout": 0}, {"timeout": 86401}):
+        with pytest.raises(session.GrassError):
+            session.budget_asked(bad)
+
+
+def test_a_run_that_runs_out_says_what_it_was_given():
+    run = raster.RasterRun.__new__(raster.RasterRun)
+    run.deadline = time.monotonic() - 1
+    run.budget = 3600
+    with pytest.raises(session.GrassError) as raised:
+        run.left()
+    assert "3600 seconds" in str(raised.value)
+    assert "timeout parameter" in str(raised.value)

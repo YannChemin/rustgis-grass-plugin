@@ -52,6 +52,13 @@ cp -a "$src/main.py" "$src/generate_manifest.py" "$src/grass_bridge" \
 	"$src/skills" "$dst/"
 if [ -f "$src/LICENSE" ]; then cp -a "$src/LICENSE" "$dst/"; fi
 cd "$dst"
+# The manifest is read from GRASS itself, one run per module: about three and
+# a half minutes for a full installation. Say so before the wait, not after.
+echo
+echo "Reading the form of every GRASS module installed here."
+echo "This takes a couple of minutes, with a count of its own; it runs again"
+echo "only after a GRASS upgrade or a new version of this package."
+echo
 python3 generate_manifest.py
 rustgis-cli plugins install "$dst"
 echo

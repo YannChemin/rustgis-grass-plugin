@@ -10,6 +10,35 @@ as a process plugin. Nothing of GRASS ships with it, so every answer depends on 
 is installed: the panel's **Last run** text says the version it found, and
 `modules.json` beside the plugin lists the modules this manifest was built from.
 
+## The panel is four steps, in the order the work is done
+
+The **GRASS GIS** panel shows one step at a time, chosen by the **Step** dropdown at
+its top, because GRASS needs them in this order:
+
+| Step | What it holds |
+|---|---|
+| `data` | the GRASS database tree, **Add Map**, **GRASS Database** |
+| `layer` | the raster layer, its band, the computational region and the cell size |
+| `terrain` | the slope, aspect and viewshed runs and their own parameters |
+| `modules` | the **Catalogue** filter, the module tree, **Chosen module**, the form, **Run Module** |
+
+The chosen layer, the region and **Last run** stay visible in the steps that act on
+them, so a run never hides what it is about to use. A command sets the step only when
+its whole result lives in another one (`data-browse`, and the three catalogue
+filters); everything else reports through **Last run** where the user already is.
+
+A script sets the step like any other panel value. It **has to** before naming a
+module: a tree keeps a value only when that value was among the nodes last sent, and
+the module tree is sent only by the module step. Without it RustGIS answers *1
+value(s) not taken … modules*.
+
+```
+plugin:grass-vector/panel-step={"panel": {"step": "modules"}}
+plugin:grass-vector/module-pick={"panel": {"modules": "runs/r.slope.aspect"}}
+```
+
+Every command still works with the panel closed.
+
 ## Reach for GRASS only when RustGIS has no answer
 
 RustGIS does buffers, clips, overlays, dissolves, spatial joins, zonal statistics,
@@ -65,7 +94,21 @@ on the file and add the result back.
   `i-rotate`) under Enhance, Preprocess, Detect and Geometry. Three shaped commands
   take parameters from the panel instead of GRASS's defaults: `raster-slope` (degrees
   or percent), `raster-aspect` and `raster-viewshed` (height, range, earth curvature,
-  from the centre of the map).
+  and the viewpoint).
+- **The viewshed looks from the place picked on the map**, the panel's **Viewpoint on
+  the Map** pick, in the terrain step. Without one it falls back to the centre of the
+  map, as it always did, and the run's messages say which was used and where it ended
+  up in the raster's own projection. A script gives the degrees and RustGIS works out
+  the rest:
+
+```
+plugin:grass-vector/raster-viewshed={"panel": {"viewpoint": {"lon": -1.55, "lat": 47.21}, "height": 30, "maxdist": 3}}
+plugin:grass-vector/region-box={"panel": {"region-box": {"bbox": [-2.0, 47.0, -1.0, 48.0]}}}
+```
+
+  `region-box` sets the Analysis Environment's extent, and so the computational region,
+  from a box drawn on the map. One drawn across the antimeridian is refused rather than
+  turned into an extent meaning the rest of the world.
 - Any other installed module is run by choosing it in the panel's module tree, filling
   or accepting its **Module parameters** form, and running `run-module`. The tree has
   three branches: **Runs from here** (the modules Run Module can drive), **All modules**
@@ -76,9 +119,10 @@ on the file and add the result back.
   mapsets** (so `t.in.era5` imports its space-time dataset there); 25 change a map of
   that same mapset in place (`r.colors`, `v.db.update`); 19 display (`d.*`)
   modules render a picture of maps from that same chosen mapset, imported back
-  as an RGB layer, with an optional PNG preview; and the rest carry the reason they cannot run. The panel's **Catalogue** tree keeps
-  all modules, only the imagery ones, or only the temporal ones; `imagery-state` and
-  `temporal-state` turn those filters on and `all-state` turns them off. A temporal
+  as an RGB layer, with an optional PNG preview; and the rest carry the reason they cannot run. The panel's **Catalogue** dropdown keeps
+  all modules (`all`), only the imagery ones (`imagery`) or only the temporal ones
+  (`temporal`); `imagery-state`, `temporal-state` and `all-state` set it from the
+  ribbon and move the panel to the module step. A temporal
   module whose required parameter names a space-time dataset or a raster cannot be
   given one by the form, so it keeps its reason.
   A leading triangle **▸** marks a module Run Module can
@@ -94,6 +138,20 @@ on the file and add the result back.
   defaults. `run-module` sends the values the form holds, and a field left empty is
   left out, so GRASS uses its own default for it. Tell the user which values were
   actually sent, rather than implying a default was chosen.
+- Choosing a layer runs `layer-pick` and choosing a module runs `module-pick`: each
+  answers only what it changed, so neither sends the catalogue back. **Run Module** is
+  disabled for a module this panel cannot drive, and **Chosen module** says why.
+- **A raster run stops after two minutes unless it is told otherwise.** Every raster
+  command declares a day in the manifest, but that only holds away from the desktop
+  app, which stops any command at 120 seconds; the plugin cannot tell which host it is
+  in, so it keeps to 120 unless the caller passes `timeout` in the command's own
+  parameters. From `rustgis-cli`, a script or Python, pass it for anything heavy
+  (`r.watershed` on a large DEM, `r.sun`); in the desktop app it cannot help, so narrow
+  the region or the raster instead. A value outside 1 to 86,400 seconds is refused.
+
+```
+plugin:grass-vector/r-watershed={"timeout": 3600, "panel": {"raster": "3"}}
+```
 - The tree's node ids carry a branch prefix (`runs/`, `all/`, `recent/`);
   `run-module` strips it. A family or branch node is refused with a request to choose
   a module.
@@ -101,9 +159,14 @@ on the file and add the result back.
   takes its parameters under `form`, by the field ids the panel's form uses:
 
 ```
-plugin:grass-vector/run-module={"panel": {"raster": "3", "modules": "all/r.slope.aspect", "form": {"format": "percent", "flag_a": true}}}
+plugin:grass-vector/run-module={"module": "r.slope.aspect", "panel": {"raster": "3", "form": {"format": "percent", "flag_a": true}}}
 plugin:grass-vector/r-watershed={"panel": {"raster": "3", "band": 1}}
 ```
+
+  `run-module` takes `module` in the command's own parameters, which is the way to run
+  one from a script: a tree keeps a value only when it was among the nodes last sent,
+  so `{"panel": {"modules": "all/r.slope.aspect"}}` alone needs the panel to have been
+  brought to its module step first.
 
   `raster` is the layer **id** as `host.layers` gives it, not its name. Without one,
   the active raster layer is used, or the only one if there is just one. `modules`
