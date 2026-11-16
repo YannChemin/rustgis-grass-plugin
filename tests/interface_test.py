@@ -747,7 +747,7 @@ def test_a_new_file_path_is_not_offered_and_says_so():
     entry = interface.describe(temporal_task(extra))
     assert entry["mapset_runnable"] is False
     assert entry["mapset_reason"] == (
-        "needs writes to a file path, which this panel does not ask for"
+        "needs a file path to write to, which this panel does not ask for"
     )
     assert entry["mapset_outputs"] == []
 

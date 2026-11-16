@@ -299,22 +299,22 @@ def _unsupplied(param):
     element = _prompt(prompt)
     if prompt.get("age") == "new":
         if element == "file":
-            return "writes to a file path, which this panel does not ask for"
+            return "a file path to write to, which this panel does not ask for"
         if element == "dbtable":
-            return "creates a database table, which this panel does not ask for"
+            return "a new database table, which this panel does not ask for"
         if _element_kind(element):
             # A new map or dataset is asked for by name on the mapset path;
             # this is only reached for a module whose family never goes there.
-            return "creates a map this panel asks for only on a mapset run"
-        return f"creates a {element or 'thing'} this panel does not ask for"
+            return "a name for the map it creates, which this panel asks for only on a mapset run"
+        return f"a new {element or 'thing'}, which this panel does not ask for"
     if element in TEMPORAL_ELEMENTS:
-        return "reads a space-time dataset, which this run does not open"
+        return "a space-time dataset of the mapset, which this run does not open"
     if element in ("raster", "cell", "raster_3d", "grid3"):
-        return "reads another raster of the mapset, which this run does not open"
+        return "another raster of the mapset, which this run does not open"
     if element == "vector":
-        return "reads a vector map of the mapset, which this run does not open"
+        return "a vector map of the mapset, which this run does not open"
     if element == "dbtable":
-        return "reads a database table, which this panel does not list"
+        return "a database table, which this panel does not list"
     return None
 
 
@@ -460,7 +460,7 @@ def _mapset_runnability(task):
             # "needs a 3D raster" sent the reader hunting for a map that does
             # not exist yet.
             missing.append(
-                _unsupplied(param) or "reads a 3D raster of the mapset, which this run does not open"
+                _unsupplied(param) or "a 3D raster of the mapset, which this run does not open"
             )
             continue
         missing.append(
