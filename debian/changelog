@@ -1,13 +1,26 @@
 rustgis-grass-plugin (0.11.0) unstable; urgency=medium
 
-  * The panel is four steps instead of one column of 24 widgets. RustGIS draws
+  * The panel is three tabs instead of one column of 24 widgets. RustGIS draws
     a panel as a flat list with no sections, so everything GRASS needs -- the
-    database, the layer and region, the terrain runs and the module catalogue,
-    four trees among them -- was several screens of scrolling. A Step dropdown
-    now chooses one of Project & data, Layer & region, Terrain and Modules, and
-    every answer sets each widget's visible from it, so at most eleven of the
-    25 widgets are drawn at once. The chosen layer, the region and Last run
+    database, the layer and region, three curated terrain runs and the module
+    catalogue, four trees among them -- was several screens of scrolling. A row
+    of tabs now chooses one of Project & data, Layer & region and Modules, and
+    every answer sets each widget's visible from it, so at most ten of the
+    20 widgets are drawn at once. The chosen layer, the region and Last run
     stay visible wherever they are acted on.
+  * The tab row is a panel item kind of its own, tabs, contributed to RustGIS
+    for this: a choice is drawn as a dropdown, so the step chooser cost a click
+    and a menu to read three labels. tabs holds options and a value exactly as
+    a choice does and draws them as a row of labels. A RustGIS build without
+    that kind refuses the whole manifest, so this package needs one that has
+    it.
+  * The curated Slope, Aspect and Viewshed runs are gone, with the fourth step
+    that held them, their hand-written parameter widgets, the Viewpoint on the
+    Map pick and their three ribbon buttons. The Module parameters form, built
+    from each module's own --interface-description, drives r.slope.aspect,
+    r.viewshed and every other module from its declared parameters, so the
+    curated three had become a second, narrower path to the same work. The
+    ribbon's Terrain menu still reaches the modules themselves.
   * A step decides what an answer carries as well as what is drawn. The module
     tree is 1,424 nodes and about 270 KB of JSON and a mapset's can be
     thousands of maps, and RustGIS keeps what an answer leaves out, so each
@@ -36,13 +49,9 @@ rustgis-grass-plugin (0.11.0) unstable; urgency=medium
     came after 0.5.0 and a panel item kind an older RustGIS does not know is a
     hard manifest error, so the 0.5.0 floor had the whole plugin refused rather
     than loaded with a widget missing.
-  * Two panel picks, which RustGIS 0.6.0 added. Viewpoint on the Map is where
-    r.viewshed looks from: it ran from the centre of the map before, whatever
-    the user wanted. Without a pick it still falls back to the centre, and the
-    run says which it used and where that landed in the raster's own
-    projection. Region from a Box draws the computational region on the map,
-    the third way GRASS users expect to set it beside the map view and the
-    whole layer; its region-box command is also on the ribbon. A box drawn
+  * A panel pick, which RustGIS 0.6.0 added: Region from a Box draws the
+    computational region on the map, the third way GRASS users expect to set it
+    beside the map view and the whole layer; its region-box command is also on the ribbon. A box drawn
     across the antimeridian is refused, since the Analysis Environment's
     extent is four increasing degrees.
   * The GRASS workspaces (.gxw) found in the database and under the home
