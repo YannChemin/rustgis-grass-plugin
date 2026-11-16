@@ -674,8 +674,12 @@ def test_the_details_text_states_what_a_module_needs():
             temporal=True,
         )
     )
-    assert "Not runnable from this panel" in blocked
+    # The refusal is this panel's, and the module is fully specified: the
+    # text says both, and names the command line that does run it.
+    assert "This panel does not run it" in blocked
     assert "needs an imagery group" in blocked
+    assert "every parameter GRASS declares" in blocked
+    assert "grass <mapset> --exec i.emissivity" in blocked
     assert "Needs: group" in blocked
     assert "space-time dataset" in blocked
     assert "Choose a module" in raster.module_details(None)
