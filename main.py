@@ -950,6 +950,14 @@ def run_module(req, module=None):
             f"{entry['module']} cannot be run from this panel: "
             f"{entry.get('reason') or 'its form cannot name what it needs'}"
         )
+    # A required field the user has not filled is caught here, before the
+    # export and the GRASS run: the module would fail on it anyway, and a
+    # message now beats one after the wait.
+    missing = raster.missing_form_values(entry, values.get("form"))
+    if missing:
+        raise session.GrassError(
+            f"{entry['module']} needs {', '.join(missing)} before it can run"
+        )
     argv = raster.free_module_args(entry) + raster.form_args(entry, values.get("form"))
 
     layers = call("host.layers") or []

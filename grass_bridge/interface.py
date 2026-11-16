@@ -220,6 +220,41 @@ def _needs_text(names):
     return f"needs {shown}" + ("..." if len(names) > 3 else "")
 
 
+#: Elements that name something living in a GRASS mapset. A form field can
+#: hold such a name, but on the raster path it would name nothing: that path
+#: runs in a throwaway project holding only the exported layer.
+MAPSET_ELEMENTS = frozenset(
+    {
+        "cell",
+        "raster",
+        "raster_3d",
+        "grid3",
+        "vector",
+        "group",
+        "subgroup",
+        "dbtable",
+        "dbcolumn",
+        "dbcolumn_name",
+        "dbdriver",
+        "dbname",
+        "region",
+        "mapset",
+        "location",
+        "labels",
+        "colortable",
+    }
+)
+
+
+def _names_a_grass_object(param):
+    """Return whether a parameter names something that lives in a mapset."""
+    prompt = param.find("gisprompt")
+    if prompt is None:
+        return False
+    element = _prompt(prompt)
+    return element in MAPSET_ELEMENTS | TEMPORAL_ELEMENTS
+
+
 def _offerable(task):
     """Return the parameter and flag names a form can offer for a module."""
     names, seen = set(), set()
@@ -643,12 +678,26 @@ def _runnability(task):
         out["reason"] = f"needs flag -{required_flags[0]}"
         return out
 
+    # A required parameter is satisfied by the module's own default, or by a
+    # field the panel's form offers for it. The second half was missing: this
+    # rule was written before the form existed and never learned about it, so
+    # r.buffer was marked "needs distances" while the form showed Distance
+    # zone(s) right above the greyed-out button. Run Module checks that the
+    # required fields are filled before it starts GRASS.
+    #
+    # Only a plain value counts here. This path runs the module in a throwaway
+    # project built around the one exported layer, where nothing of the user's
+    # mapset exists, so a typed imagery group, vector or dataset name would
+    # refer to nothing: those keep their reason.
+    offered = _offerable(task)
     needs = []
     for param in required:
         if param is chosen_in or param is chosen_out:
             continue
         name = param.get("name") or ""
         if _text(param.find("default")):
+            continue
+        if name in offered and not _names_a_grass_object(param):
             continue
         needs.append(name)
     if needs:
@@ -848,9 +897,14 @@ def form_fields(xml_text):
         if kind is None:
             continue
         if kind == "number" and (
-            spec.get("keys", 0) > 1 or isinstance(spec.get("default"), str)
+            spec.get("keys", 0) > 1
+            or isinstance(spec.get("default"), str)
+            or spec["multiple"]
         ):
-            # A range or a list of numbers stays as it is written.
+            # A range, or a parameter that takes several numbers, stays as it
+            # is written: one number box cannot hold r.buffer's
+            # distances=100,200,500, and offering one made its own module
+            # unrunnable for every zone after the first.
             kind = "text"
         label = _short_label(spec["label"])
         field = {

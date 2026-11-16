@@ -45,9 +45,9 @@ They are reached three ways, because the ABI gives three and each has a ceiling:
 |---|---|---|
 | **Tools**, with a generated form in the Tools pane | 64 vector modules | a manifest holds **64 tools**, and a tool takes no raster, so only vector modules qualify: 128 do, half of them fit |
 | **Commands** on the ribbon | Slope, Aspect, Viewshed, **18 common raster modules** and **7 imagery modules** in menus by theme, the region and the database | a manifest holds up to **256 commands**, and a command opens no dialog, so each needs the panel to be told anything |
-| **Run Module**, from the panel's tree | **all 1,195** are reached and show their parameters; **276** can be run: the **88** that read one raster and write one, **169** temporal, database and general ones whose form is all they need (imports such as `t.in.era5`, changes to a map of the chosen mapset in place such as `r.colors` and `v.db.update`, and the modules that read a space-time dataset of that mapset and write a new map or dataset into it, such as `t.rast.list` and `t.rast.series`), and **19** display modules that render a picture | a command has no form of its own, so the panel's **Module parameters** form sends the values it holds; the rest need several rasters at once, a file path, or a database table |
+| **Run Module**, from the panel's tree | **all 1,195** are reached and show their parameters; **348** can be run: the **160** that read one raster and write one, **169** temporal, database and general ones whose form is all they need (imports such as `t.in.era5`, changes to a map of the chosen mapset in place such as `r.colors` and `v.db.update`, and the modules that read a space-time dataset of that mapset and write a new map or dataset into it, such as `t.rast.list` and `t.rast.series`), and **19** display modules that render a picture | a command has no form of its own, so the panel's **Module parameters** form sends the values it holds; the rest need several rasters at once, a file path, or a database table |
 
-The tree is searchable and has three branches: **Runs from here** (the 276), **All modules**
+The tree is searchable and has three branches: **Runs from here** (the 348), **All modules**
 (all 1,195, each with its reason for not running here) and **Recently run**. A **Catalogue**
 dropdown above it keeps all modules, only the imagery (`i.*`) ones, or only the temporal
 (`t.*`) ones; the ribbon's **Modules › Catalogue** menu sets the same filter and brings the
@@ -85,8 +85,9 @@ selection leaves the parameter out, so GRASS uses its own default. Changing the 
 keeps the values of fields with the same name and starts the new ones at their defaults.
 
 So "every GRASS module" is true for *reaching* them and for *showing their parameters*: 1,195
-forms are generated from the installation. It is false for *running* them from the panel: 276
-can be run, and the rest need several rasters at once, a file path or a database table. The 64-tool form
+forms are generated from the installation. It is false for *running* them from the panel: 348
+can be run, and the rest need several rasters at once, a name from a mapset the run never sees,
+a file path or a database table. The 64-tool form
 budget is the ABI's; the panel's form has no such budget.
 
 ### The panel: four steps, not one column
@@ -501,6 +502,34 @@ Nothing about such a parameter is visible in `--help`: GRASS declares it `type="
 any other name. What marks it is the `<gisprompt>` in the module's interface description —
 `age="old" element="strds"` for a dataset it reads, `age="new"` for a map it writes — and that
 is what the bridge reads to decide which fields it can fill.
+
+## A required parameter the form offers is not a reason to refuse
+
+Until 0.11.0 the raster path asked only one question of a required parameter: does GRASS give it
+a default? If not, the module was refused. That rule was written before the panel had a form and
+never learned that it does, so `r.buffer` was listed as **"Not runnable from this panel: needs
+distances"** with its own **Distance zone(s)** field filled in right above the greyed-out button.
+It now counts the form, and **72 more raster modules run**: `r.buffer`, `r.lake`, `r.carve`,
+`r.catchment`, `i.topo.corr`, `i.modis.qc`, the `r.li.*` landscape-index family and the rest.
+
+Two conditions keep it honest:
+
+- **Only a plain value counts.** This path runs the module in a throwaway project built around
+  the one exported layer, where nothing of the user's mapset exists, so a typed imagery group,
+  vector, dataset or table name would name nothing. Those keep their reason — `i.example` still
+  says *needs an imagery group*, and `needs 2 raster inputs` is untouched.
+- **A required field left empty is caught before the export and the GRASS run**, as the mapset
+  path already did: `r.buffer needs distances before it can run`, not a GRASS error after the
+  wait.
+
+A parameter that takes **several** numbers is a text field, not a number box. `r.buffer` takes
+`distances=100,200,500`, and one number box can hold one zone — which made the module's own
+point unreachable even once it was runnable. The same already applied to a range such as
+`i.pca`'s `rescale=0,255`.
+
+The run message says what was actually sent: `r.buffer ran in …, with distances, units from the
+form and GRASS's own defaults for the rest.` It used to say *"with GRASS's own defaults"* whatever
+the form had supplied, which is the same untruth as the greyed-out button.
 
 ## Reaching a module from a script, in one call
 

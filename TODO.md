@@ -557,6 +557,42 @@ Still open, and each for a stated reason rather than for want of a field:
   refused as they are from the panel. The raster path needs no equivalent -- it needs a layer
   RustGIS holds, which `raster` already names.
 
+### DONE — The raster path counts the form it was given in 0.8.0
+
+Found from a screenshot on 2026-11-16: `r.buffer` showed **Distance zone(s) 100** in the form
+and, right under it, *"Not runnable from this panel: needs distances"* with Run Module greyed
+out. The user's words were "r.buffer does not have input and output" -- true, and by design on
+this path (the input is the chosen layer, the output the imported result); what was wrong was
+refusing the module for a parameter the form was already showing.
+
+`_runnability` asked only whether GRASS gave the parameter a default. It was written before the
+form existed (0.8.0) and never learned about it, exactly as `_cannot_name` had not: the same
+mistake in the one path still untouched. `_mapset_runnability` had been taught, which is why
+temporal modules ran and raster ones did not.
+
+**88 -> 160 raster modules, 276 -> 348 runnable overall.** `r.buffer`, `r.lake`, `r.carve`,
+`r.catchment`, `r.extract`, `i.topo.corr`, `i.modis.qc`, the whole `r.li.*` landscape-index
+family. The manifest gained 5 curated commands, `r.buffer` among them, since a command is only
+generated for a runnable module.
+
+Two things keep it honest:
+
+- Only a **plain value** counts. The raster path runs in a throwaway project holding just the
+  exported layer, so a typed imagery group, vector, dataset or table name would name nothing
+  there; `MAPSET_ELEMENTS` keeps those refused. The group test that failed when this was first
+  written was right, and is now the test for that rule.
+- A required field left empty is caught **before** the export and the GRASS run, as the mapset
+  path already did.
+
+Two more bugs the same screenshot exposed, both fixed:
+
+- **A parameter taking several numbers was a single number box.** `r.buffer` takes
+  `distances=100,200,500`; one box holds one zone, so the module's own point was unreachable
+  even once it ran. A `multiple` numeric parameter is now a text field, as a range already was.
+- **The run message claimed "with GRASS's own defaults"** whatever the form had sent. It now
+  names them: `with distances, units from the form and GRASS's own defaults for the rest`, and
+  the follow-up line says what the bridge set as against what the form set.
+
 ### DONE — A workspace found in a backup opens from where it actually is
 
 Reported from the app on 2026-11-16:

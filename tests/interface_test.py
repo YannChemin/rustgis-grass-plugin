@@ -540,17 +540,44 @@ def test_a_module_wanting_several_bands_is_marked_not_run():
     assert entry["reason"] == "needs several bands"
 
 
-def test_a_required_flag_or_parameter_is_a_reason_not_a_silent_failure():
+def test_a_required_flag_is_a_reason_not_a_silent_failure():
     flag = interface.describe(raster_task('<flag name="c" required="yes" />'))
     assert flag["reason"] == "needs flag -c"
-    param = interface.describe(
+
+
+def test_a_required_plain_value_is_a_form_field_not_a_refusal():
+    # r.buffer's shape: one raster in, one out, and a required "distances"
+    # with no default. The form has offered a field for it since 0.8.0; this
+    # rule was written before the form existed and never learned, so the panel
+    # showed Distance zone(s) filled with 100 above a greyed-out Run Module
+    # and the words "Not runnable from this panel: needs distances".
+    task = raster_task(
+        '<parameter name="threshold" type="float" required="yes">'
+        "<description>Cut-off</description></parameter>"
+    )
+    param = interface.describe(task)
+    assert param["runnable"] is True
+    assert param["reason"] == ""
+    assert param["needs"] == []
+    # And the field it is satisfied by is really there, marked required.
+    field = next(f for f in interface.form_fields(task) if f["id"] == "threshold")
+    assert field["kind"] == "number" and field["required"] is True
+
+
+def test_a_required_name_from_the_mapset_is_still_a_refusal():
+    # The raster path runs in a throwaway project holding only the exported
+    # layer, so a typed imagery group or vector name would name nothing there.
+    # A form field is not an answer for those.
+    group = interface.describe(
         raster_task(
-            '<parameter name="threshold" type="float" required="yes">'
-            "<description>Cut-off</description></parameter>"
+            '<parameter name="group" type="string" required="yes">'
+            "<description>Imagery group</description>"
+            '<gisprompt age="old" element="group" prompt="group" /></parameter>',
+            name="i.example",
         )
     )
-    assert param["reason"] == "needs threshold"
-    assert param["needs"] == ["threshold"]
+    assert group["runnable"] is False
+    assert group["needs"] == ["group"]
 
 
 def test_temporal_modules_are_recognised_by_their_dataset_prompt():
@@ -1598,3 +1625,24 @@ def test_module_values_must_be_an_object():
 
     with pytest.raises(session.GrassError, match="go in an object"):
         main.with_params({}, {"values": "input=a"})
+
+
+def test_a_parameter_taking_several_numbers_is_a_text_field():
+    # r.buffer's distances=100,200,500. One number box cannot hold a list, and
+    # offering one made the module's own point unreachable: the screenshot
+    # showed "Distance zone(s) 100" with no way to add a second zone.
+    task = raster_task(
+        '<parameter name="distances" type="double" required="yes" multiple="yes">'
+        "<description>Distance zone(s)</description></parameter>"
+    )
+    field = next(f for f in interface.form_fields(task) if f["id"] == "distances")
+    assert field["kind"] == "text"
+    # One number is still a number box.
+    one = raster_task(
+        '<parameter name="threshold" type="double" required="yes">'
+        "<description>Cut-off</description></parameter>"
+    )
+    assert (
+        next(f for f in interface.form_fields(one) if f["id"] == "threshold")["kind"]
+        == "number"
+    )

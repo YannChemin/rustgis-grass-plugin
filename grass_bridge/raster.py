@@ -1324,7 +1324,21 @@ class RasterRun(session.Run):
             raise session.GrassError(f"{module} wrote no file at {target}")
 
         where = proj or "the raster's own projection"
-        messages = [f"{module} ran in {where}, with GRASS's own defaults."]
+        # Say which parameters the form supplied. Claiming "GRASS's own
+        # defaults" while the form had just sent distances=100,200 was the
+        # same kind of untruth as a greyed-out button beside a filled field.
+        # The first two arguments are the bridge's own input and output.
+        from_form = sorted(
+            arg.split("=", 1)[0].removeprefix("-") if "=" in arg else arg.lstrip("-")
+            for arg in argv[2:]
+            if not arg.startswith("--")
+        )
+        messages = [
+            f"{module} ran in {where}, with {', '.join(from_form)} from the "
+            "form and GRASS's own defaults for the rest."
+            if from_form
+            else f"{module} ran in {where}, with GRASS's own defaults."
+        ]
         if region:
             messages.append(
                 "Computational region used: "
@@ -1332,10 +1346,16 @@ class RasterRun(session.Run):
                 f"{region.get('ewres', '?')} by {region.get('nsres', '?')}."
             )
         messages += region_notes
+        named = f"{argv[0].split('=')[0]} and {argv[1].split('=')[0]}"
         messages.append(
-            f"Only {argv[0].split('=')[0]} and {argv[1].split('=')[0]} were set; "
-            "every other parameter is GRASS's default, because a command has no "
-            "form to ask with."
+            f"The bridge set {named}; "
+            + (
+                f"the form set {', '.join(from_form)}. Every other parameter "
+                "is GRASS's default."
+                if from_form
+                else "every other parameter is GRASS's default, because "
+                "nothing was set in the form."
+            )
         )
         for text, count in self.warnings.items():
             messages.append(

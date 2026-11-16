@@ -113,8 +113,9 @@ plugin:grass-vector/region-box={"panel": {"region-box": {"bbox": [-2.0, 47.0, -1
   or accepting its **Module parameters** form, and running `run-module`. The tree has
   three branches: **Runs from here** (the modules Run Module can drive), **All modules**
   (every installed module, with the reason the others cannot be driven) and **Recently
-  run**. Any readable module shows its parameters in the form. **276 of 1,195 run**: the
-  88 that read one raster and write one run on the chosen layer; 169 temporal, database
+  run**. Any readable module shows its parameters in the form. **348 of 1,195 run**: the
+  160 that read one raster and write one run on the chosen layer, with the form's values
+  for whatever else they require (`r.buffer`'s `distances`); 169 temporal, database
   and general modules run with the form in the GRASS project/mapset chosen under
   **Projects and mapsets** (so `t.in.era5` imports its space-time dataset there, and
   `r.colors` or `v.db.update` change a map of that mapset in place); 19 display (`d.*`)

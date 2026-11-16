@@ -81,6 +81,19 @@ rustgis-grass-plugin (0.11.0) unstable; urgency=medium
     more; one that must name a map it writes still is, and now says so --
     t.rast.to.rast3 reported a missing 3D raster when what it needs is a name
     for the one it writes.
+  * A raster module is no longer refused for a required parameter the panel's
+    form already offers. That rule was written before the form existed and
+    never learned about it, so r.buffer was listed "needs distances" with its
+    Distance zone(s) field filled in right above the greyed-out button. 72
+    more raster modules run (160 on that path, 348 in all): r.buffer, r.lake,
+    r.carve, r.catchment, i.topo.corr, i.modis.qc and the r.li.* family. Only
+    a plain value counts, because that path runs in a throwaway project where
+    a typed imagery group, vector or dataset name would name nothing, and a
+    required field left empty is caught before the export and the GRASS run.
+  * A parameter that takes several numbers is a text field, not a number box:
+    r.buffer takes distances=100,200,500 and one box holds one zone.
+  * A raster run says which parameters the form supplied instead of claiming
+    GRASS's own defaults whatever was sent.
   * run-module takes mapset ("<project>/<mapset>") and values (the module's
     parameters by their form field ids) beside module, so a script reaches a
     module in one call instead of walking the panel there in four: a tree
