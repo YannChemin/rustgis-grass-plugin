@@ -390,6 +390,9 @@ the README install line point at the `0.8.0` package.
 
 ### DONE — The panel is four steps, and the tab is decluttered (0.11.0)
 
+*Superseded in part by the three-tab entry below: there are three steps now,
+drawn as tabs.*
+
 RustGIS draws a panel as one flat column with no section, tab or accordion, so
 24 widgets with four trees in them was several screens of scrolling. A `step`
 dropdown and `grass_bridge/panel.py` make it four steps -- project and data,
@@ -400,6 +403,33 @@ of them holding one tool) to nine themed ones, and every command and menu
 carries an icon of its own. `minRustgisVersion` is 0.6.0, because the panel's
 `form` and `choice` items came after 0.5.0 and an unknown panel item kind is a
 hard manifest error. `UX_REFACTOR.md` is the survey this came from.
+
+### DONE — Three tabs, and the curated terrain runs removed (0.11.0)
+
+The fourth step held **Slope**, **Aspect** and **Viewshed**: three curated runs
+with hand-written parameter widgets (degrees or percent, observer height, max
+distance, earth curvature) and a **Viewpoint on the Map** pick. Once the
+**Module parameters** form was built from each module's own
+`--interface-description`, those three were a second, narrower path to
+*r.slope.aspect* and *r.viewshed* -- fewer parameters than GRASS declares, and
+code to maintain beside the general path. They are gone, with the step, the
+widgets, the pick, their three ribbon buttons, `OPERATIONS`, `module_args`,
+`RasterRun.raster_tool`, `run_raster_command`, `picked_point` and nine tests
+that pinned them. The ribbon's **Terrain** menu still reaches the modules.
+
+The three remaining steps are drawn as a **row of tabs**, not a dropdown. That
+needed a new panel item kind in RustGIS: `choice` is an egui `ComboBox`, so
+reading three labels cost a click and a menu. `tabs` holds `options` and a
+value exactly as a `choice` does -- the two share a new
+`panel::picks_an_option(kind)` -- and `pluginpanel.rs` draws it as a
+`horizontal_wrapped` row of `selectable_label`s. Changed in RustGIS:
+`crates/plugins/src/panel.rs`, `crates/plugins/src/tests.rs` (the pinned kinds
+message, plus two tests for the new kind), `crates/ui-egui/src/pluginpanel.rs`.
+`cargo test -p rustgis-plugins` is 70 passing; `rustgis-cli plugins install`
+accepts the manifest and each tab draws its own widgets (data 7, layer 10,
+modules 9 of 20). The plugin suite is 200 passing. **This package needs a
+RustGIS build that has the `tabs` kind**: an unknown panel item kind is a hard
+manifest error, so an older build refuses the whole plugin.
 
 ## Remaining work
 
@@ -428,13 +458,11 @@ A tree's nodes are now sent only by the step that draws it
 (`grass_bridge/panel.py`), the raster tree excepted: it is one node per raster
 layer and a tree keeps a chosen value only while its nodes were last sent.
 
-### DONE — Panel picks for the viewpoint and the region
+### DONE — A panel pick for the region
 
 RustGIS 0.6.0's `pick` panel item asks for a point or a box on the map.
-**Viewpoint on the Map** (point, terrain step) is where `r.viewshed` looks
-from; it declares no command, so picking marks the place and the next Viewshed
-uses it, and the ribbon button still works with the panel closed because a run
-without a pick falls back to the centre of the map and says which it used.
+**Viewpoint on the Map** (point, terrain step) was where `r.viewshed` looked
+from; it went with the curated terrain runs, above.
 **Region from a Box** (box, layer step) runs the new `region-box` command,
 which sets the Analysis Environment's extent from the box's degrees; a box
 across the antimeridian or with no height is refused, since the extent is four
