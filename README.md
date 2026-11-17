@@ -134,7 +134,7 @@ The step also decides what an answer *carries*. The module tree is **1,424 nodes
 leaves out, so each tree is sent only by the step that draws it. Choosing a layer used to rebuild
 and send the whole catalogue for a choice that cannot change it; it now runs `layer-pick`, and
 choosing a module runs `module-pick`, which makes no host request at all. Measured here, on a
-database of 60 projects, over the plugin's own protocol:
+database of 62 projects, over the plugin's own protocol:
 
 | Answer | Before | After |
 |---|---|---|
@@ -332,8 +332,8 @@ finds it: `GISDBASE` when set, otherwise the `GISDBASE:` line of `~/.grass8/rc`,
 
 | Step | What happens |
 |---|---|
-| Open the panel | The **workspaces** are listed first (below), then projects and mapsets are read from the file system — a project is a folder with a PERMANENT mapset, a mapset one with a `WIND` file. 51 projects, 35,241 maps, in 0.03 s |
-| Choose a mapset | Its imagery groups are listed first, then its maps: `cellhd` entries are rasters, `vector` folders are vectors. They load only then, because 35,000 maps do not fit a tree that takes 5,000 nodes |
+| Open the panel | The **workspaces** are listed first (below), then projects and mapsets are read from the file system — a project is a folder with a PERMANENT mapset, a mapset one with a `WIND` file. **62 projects, 58,773 maps**: the projects and mapsets in **0.001 s**, the whole tree in **0.36 s**, nearly all of it the workspace scan below |
+| Choose a mapset | Its imagery groups are listed first, then its maps: `cellhd` entries are rasters, `vector` folders are vectors. They load only then, because 58,000 maps do not fit a tree that takes 5,000 nodes |
 | Choose a map, then **Add Map** | It is exported and added to the project: a raster as a GeoTIFF, a vector as a GeoPackage, both of which carry the coordinate system. The view is then put in that GRASS project's own system (below) |
 | Choose a **group**, then **Add Map** | Its bands are composed into one picture by the display module that fits, and added as a single RGB layer (below) |
 | Choose a mapset, then **Run Module** | A temporal, database or general module runs in that mapset, so what it writes outlives the run: `t.in.era5` imports its space-time dataset there |
@@ -363,8 +363,8 @@ Workspaces (26)
 
 They are looked for in the GRASS database and under the home folder. **Where it does not look
 matters more than how deep it goes:** a GRASS mapset — any folder holding a `WIND` file — is
-never listed, because that is where a database's 35,000 maps are. Walking into them took **6.5 s**;
-pruning them takes **0.27 s** for the same 26 workspaces, so the scan runs on each panel open
+never listed, because that is where a database's 58,000 maps are. Walking into them took **6.5 s**;
+pruning them takes **0.32 s** for the same 26 workspaces, so the scan runs on each panel open
 rather than being cached into something that can go stale. The database itself is not walked at
 all: GRASS writes a project's workspace beside it, so one listing of the project folders finds it.
 Hidden folders, `node_modules`, `venv`, `target` and the like are skipped, and the walk stops four
