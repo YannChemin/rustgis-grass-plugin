@@ -17,7 +17,7 @@ top, because GRASS needs them in this order:
 
 | Tab | What it holds |
 |---|---|
-| `data` | the GRASS database tree, **Add Map**, **Load Workspace**, **Browse Mapset**, **GRASS Database** |
+| `data` | the GRASS database tree, **Add Map**, **Load Workspace**, **Save Workspace**, **Browse Mapset**, **GRASS Database** |
 | `layer` | the raster layer, its band, the computational region and the cell size |
 | `modules` | the **Catalogue** filter, the module tree, **Chosen module**, the form, **Run Module** |
 
@@ -141,6 +141,15 @@ plugin:grass-vector/region-box={"panel": {"region-box": {"bbox": [-2.0, 47.0, -1
 - Choosing a layer runs `layer-pick` and choosing a module runs `module-pick`: each
   answers only what it changed, so neither sends the catalogue back. **Run Module** is
   disabled for a module this panel cannot drive, and **Chosen module** says why.
+- **Save Workspace puts the layers back into a GRASS workspace**, as
+  `<name>_rustgis.gxw` beside the one that was loaded (`{"to": "<path>.gxw"}` for
+  another target). It saves which GRASS maps are in the project, their order, their
+  ticks, their opacity and the view as the display extent, editing the original
+  file's tree so the GUI layout and each layer's own `d.vect` task survive. It
+  **never writes the `.gxw` it read**: a GRASS GUI session holding that file open
+  rewrites it on exit. Say what was left out -- a layer that is not a map of that
+  GRASS project (a file from disk, a basemap, a web layer) has no name a `.gxw` can
+  carry, and RustGIS styling has no `.gxw` equivalent.
 - **Add Map, Load Workspace and Browse Mapset are panel buttons, not ribbon ones.**
   Each acts on the node chosen in the Data tree, so the ribbon (where no tree is in
   sight, and where a button cannot be greyed out) was the wrong place for them. They
@@ -160,9 +169,8 @@ plugin:grass-vector/region-box={"panel": {"region-box": {"bbox": [-2.0, 47.0, -1
   the layers of whatever project it is loaded into** (and refuses outright if that
   project has unsaved changes, unless `discard` is passed); it does **not** replace
   the project itself -- a plugin may not, so the project's name and file are
-  unchanged, and the empty project is the user's own click; and it is **read-only
-  towards the `.gxw`** -- layers added, removed or reordered afterwards stay in the
-  RustGIS project and the workspace file is left as it was. Reach it from a script with
+  unchanged, and the empty project is the user's own click; and the `.gxw` it read is
+  **never written** -- **Save Workspace** writes `<name>_rustgis.gxw` beside it. Reach it from a script with
   `{"workspace": "workspace/<percent-encoded path>", "discard"?: true}`; the path is
   percent-encoded because a node id is built with `/`.
 

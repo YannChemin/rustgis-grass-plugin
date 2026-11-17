@@ -1,5 +1,26 @@
 rustgis-grass-plugin (0.11.0) unstable; urgency=medium
 
+  * Load Workspace and Save Workspace take a plain path to the .gxw in the
+    command's own parameters, not only the panel tree's percent-encoded node
+    id. A script cannot choose in a tree, and the path is what it has.
+  * Save Workspace, which puts the project's GRASS layers back into a GRASS
+    workspace: which maps are in it, in which order, ticked or not, at what
+    opacity, and the view as the display's extent. It writes
+    <name>_rustgis.gxw beside the workspace that was loaded ({"to": "<path>"}
+    for another target) and never the .gxw it read, which is GRASS's own file
+    and which a GRASS GUI session holding it open rewrites on exit. The
+    original file's tree is edited rather than regenerated, so the GUI layout,
+    each surviving layer's own d.vect task and everything else the plugin does
+    not model are kept; a new layer gets the minimal d.rast or d.vect task
+    that draws it. A layer that is not a map of that GRASS project -- a file
+    from disk, a basemap, a web layer -- has no name a .gxw can carry and is
+    left out by name, as is a view that will not project.
+  * Load Workspace stacks the layers the right way up. The first <layer> of a
+    display is the top of the stack: GRASS writes its layer tree top first and
+    draws it bottom first, and RustGIS lists its layers top first while
+    layer.addData puts each new one on top. Loading added them in document
+    order, which turned the stack upside down; it loads from the bottom up
+    now, and Save Workspace writes from the top down.
   * The README says plainly that a workspace is loaded into an empty RustGIS
     project: loading clears the layers of the project it is loaded into, and
     RustGIS opens on the World Atlas sample, so the empty project (Project >

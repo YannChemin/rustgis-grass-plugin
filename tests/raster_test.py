@@ -1592,3 +1592,16 @@ def test_a_workspace_with_no_display_is_not_written_over(tmp_path):
     )
     with pytest.raises(session.GrassError, match="no map display"):
         database.write_workspace(str(path), str(tmp_path / "out.gxw"), [])
+
+
+def test_a_workspace_is_named_by_its_path_as_well_as_by_a_tree_node(tmp_path):
+    """A script names the file; only the panel can name a tree node."""
+    path = _gxw(tmp_path)
+    node = database.workspace_node(path)
+    assert database.workspace_node_of(node) == node
+    assert database.workspace_node_of(path) == node
+    assert database.parse_workspace_node(database.workspace_node_of(path)) == path
+    # Anything that is neither is no workspace, and says so rather than
+    # being turned into a node that names nothing.
+    assert database.workspace_node_of("mapset/Proj/PERMANENT") == ""
+    assert database.workspace_node_of("") == ""

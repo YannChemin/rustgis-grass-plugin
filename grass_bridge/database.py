@@ -41,6 +41,9 @@ MAX_NODES = 4000
 #: from a script: "raster/C2RD_drone/PERMANENT/lidarhd_mnt".
 SEP = "/"
 
+#: The node kinds of the tree that name one map.
+MAP_KINDS = ("raster", "vector", "group")
+
 
 #: How deep under the home folder a workspace is looked for. GRASS writes one
 #: beside its project (``~/grassdata/<project>/default.gxw``, depth 3), and a
@@ -398,6 +401,24 @@ def workspace_node(path):
     return "workspace" + SEP + urllib.parse.quote(path, safe="")
 
 
+def workspace_node_of(given):
+    """Return the tree node id for a workspace a caller named.
+
+    A script cannot choose in a tree -- RustGIS keeps a tree's value only
+    while that value was among the nodes last sent -- so a caller names the
+    file itself. A plain path to a ``.gxw`` is turned into the node the panel
+    would have sent; a node id given in full is passed through; anything
+    else gives ``""``. The counterpart of :func:`mapset_node` for
+    workspaces.
+    """
+    text = str(given or "").strip()
+    if is_workspace_node(text):
+        return text
+    if text.lower().endswith(".gxw"):
+        return workspace_node(os.path.abspath(os.path.expanduser(text)))
+    return ""
+
+
 def is_workspace_node(node):
     """Say whether a tree node id names a workspace file.
 
@@ -412,7 +433,7 @@ def is_workspace_node(node):
 def is_map_node(node):
     """Say whether a tree node id names a map or an imagery group."""
     parts = (node or "").split(SEP, 3)
-    return len(parts) == 4 and parts[0] in ("raster", "vector", "group")
+    return len(parts) == 4 and parts[0] in MAP_KINDS
 
 
 def parse_workspace_node(node):
@@ -439,7 +460,7 @@ def parse_node(node):
     :raises session.GrassError: when the id names no map
     """
     parts = (node or "").split(SEP, 3)
-    if len(parts) != 4 or parts[0] not in ("raster", "vector", "group"):
+    if len(parts) != 4 or parts[0] not in MAP_KINDS:
         raise session.GrassError(
             "choose a map or an imagery group in the GRASS Data tree, not a "
             "project or a mapset"
@@ -620,7 +641,7 @@ def opened(node):
     parts = (node or "").split(SEP, 3)
     if len(parts) == 3 and parts[0] == "mapset":
         return parts[1], parts[2]
-    if len(parts) == 4 and parts[0] in ("raster", "vector", "group"):
+    if len(parts) == 4 and parts[0] in MAP_KINDS:
         return parts[1], parts[2]
     return None
 

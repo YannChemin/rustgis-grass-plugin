@@ -1688,3 +1688,76 @@ def test_run_module_with_nothing_chosen_opens_the_catalogue(monkeypatch, tmp_pat
     assert panel_out["items"]["run-module"]["enabled"] is False
     assert "Run Module" in out["asked"]
     assert any("Run Module" in (params or {}).get("text", "") for params in said)
+
+
+def test_a_workspace_loads_bottom_up_so_its_top_layer_stays_on_top(
+    monkeypatch, tmp_path
+):
+    """The first <layer> of a GRASS display is the top of the stack.
+
+    GRASS writes its layer tree top first (``core/workspace.py`` walks it
+    from the first child) and draws it bottom first
+    (``lmgr/layertree.py``'s ``GetVisibleLayers`` reverses before
+    rendering), so the first element is drawn last -- on top. RustGIS keeps
+    its own layers top first and puts each added layer on top, so the
+    workspace has to be loaded from the bottom up or the stack comes out
+    upside down.
+    """
+    import main
+
+    added = []
+
+    def fake_call(op, params=None):
+        if op == "layer.addData":
+            added.append((params or {}).get("name"))
+            return {"layer": len(added)}
+        if op == "info.project":
+            return {"unsaved": False}
+        if op == "host.layers":
+            return []
+        return {}
+
+    class FakeExport:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def crs(self, *_):
+            return "EPSG:4326"
+
+        def export(self, *_):
+            return []
+
+    monkeypatch.setattr(main, "call", fake_call)
+    monkeypatch.setattr(main, "harmonise_projection", lambda *a: [])
+    monkeypatch.setattr(main, "frame_workspace", lambda *a: [])
+    monkeypatch.setattr(main.database, "gisdbase", lambda: str(tmp_path))
+    monkeypatch.setattr(main.database, "Export", lambda **k: FakeExport())
+    monkeypatch.setattr(main.database, "remember_loaded", lambda path: path)
+    monkeypatch.setattr(
+        main.database,
+        "workspace_place",
+        lambda *a: (str(tmp_path), "Proj"),
+    )
+    monkeypatch.setattr(
+        main.database,
+        "read_workspace",
+        lambda path: {
+            "database": str(tmp_path),
+            "project": "Proj",
+            "mapset": "PERMANENT",
+            "displays": 1,
+            "extent": None,
+            "layers": [
+                {"kind": "raster", "map": "top", "mapset": "PERMANENT", "shown": True},
+                {"kind": "raster", "map": "mid", "mapset": "PERMANENT", "shown": True},
+                {"kind": "raster", "map": "low", "mapset": "PERMANENT", "shown": True},
+            ],
+        },
+    )
+    node = main.database.workspace_node(str(tmp_path / "default.gxw"))
+    main.load_workspace({"params": {}, "panel": {"values": {"database": node}}})
+    # Added bottom first, so the workspace's first layer ends up on top.
+    assert added == ["low@PERMANENT", "mid@PERMANENT", "top@PERMANENT"]

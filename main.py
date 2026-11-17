@@ -266,6 +266,18 @@ def panel_answer(items=None, values=None, step=None):
     return out
 
 
+def is_tree_node(value):
+    """Say whether a value is an id the GRASS Data tree could have sent.
+
+    What a tree holds is only ever kept while it was among the nodes last
+    sent, so a value that is not one of them must not be sent back as the
+    tree's value: RustGIS answers "1 value(s) not taken". A path or a name
+    from a script's parameters is such a value.
+    """
+    kind = str(value or "").partition(database.SEP)[0]
+    return kind in ("workspace", "branch", "project", "mapset", *database.MAP_KINDS)
+
+
 def ask_in_tree(chosen, what, press):
     """Return the answer for a command that needs a choice in the data tree.
 
@@ -292,12 +304,20 @@ def ask_in_tree(chosen, what, press):
     :param press: the button to press once it is chosen
     """
     said = f"Choose {what} in the GRASS Data tree below, then press {press}."
+    node = is_tree_node(chosen)
     if chosen:
-        parts = str(chosen).split(database.SEP)
-        named = database.SEP.join(parts[1:]) or str(chosen)
+        # A node id is said without its kind ("mapset/Proj/PERMANENT" ->
+        # "Proj/PERMANENT"); anything else -- a path or a name a script
+        # passed -- is said as it was given, since splitting it on the
+        # node separator would cut a path to pieces.
+        named = (
+            database.SEP.join(str(chosen).split(database.SEP)[1:])
+            if node
+            else str(chosen)
+        )
         said = (
-            f"{named} is not {what}. Choose {what} in the GRASS Data tree "
-            f"below, then press {press}."
+            f"{named or chosen} is not {what}. Choose {what} in the GRASS "
+            f"Data tree below, then press {press}."
         )
     call("host.notify", {"text": said})
     items = database_panel(chosen)
@@ -310,7 +330,7 @@ def ask_in_tree(chosen, what, press):
     return {
         "asked": said,
         "messages": [said],
-        "panel": panel_answer(items, {"database": chosen} if chosen else None, "data"),
+        "panel": panel_answer(items, {"database": chosen} if node else None, "data"),
     }
 
 
@@ -465,11 +485,9 @@ def save_workspace(req):
     base = database.gisdbase()
     if not base:
         raise session.GrassError("no GRASS database was found")
-    asked = params.get("workspace") or ""
-    path = asked if asked.lower().endswith(".gxw") else ""
-    if not path and asked:
-        path = database.parse_workspace_node(database.workspace_node(asked))
     chosen = values.get("database")
+    node = database.workspace_node_of(params.get("workspace") or "")
+    path = database.parse_workspace_node(node) if node else ""
     if not path and database.is_workspace_node(chosen):
         path = database.parse_workspace_node(chosen)
     path = path or database.last_loaded()
@@ -597,9 +615,10 @@ def load_workspace(req):
     values = panel_values(req)
     params = req.get("params") or {}
     chosen = params.get("workspace") or values.get("database")
-    if not database.is_workspace_node(chosen):
+    node = database.workspace_node_of(chosen)
+    if not node:
         return ask_in_tree(chosen, "a workspace under Workspaces", "Load Workspace")
-    path = database.parse_workspace_node(chosen)
+    path = database.parse_workspace_node(node)
     workspace = database.read_workspace(path)
     if not workspace:
         raise session.GrassError(f"{path} is not a readable GRASS workspace")

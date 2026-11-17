@@ -404,6 +404,43 @@ carries an icon of its own. `minRustgisVersion` is 0.6.0, because the panel's
 `form` and `choice` items came after 0.5.0 and an unknown panel item kind is a
 hard manifest error. `UX_REFACTOR.md` is the survey this came from.
 
+### DONE — Save Workspace, and the stack the right way up (0.11.0)
+
+A workspace was read and never written. **Save Workspace** (`data-save`,
+`main.save_workspace`, `database.write_workspace`) puts the project's GRASS
+layers back: which maps are in it, in which order, ticked or not, at what
+opacity, and the view as the display's extent.
+
+**It writes a sibling, `<name>_rustgis.gxw`, not the file it read** (`{"to":
+"<path>.gxw"}` for another target). The `.gxw` is GRASS's own file, and a
+GRASS GUI session holding it open rewrites it on exit, so an overwrite could
+be silently undone by the application already using it. The user chose this
+over overwriting with a backup.
+
+**The original tree is edited, not regenerated.** A `.gxw` carries the GUI's
+`<layout>` panes and notebook, each layer's `<task>` with its `d.vect`
+colours, icons and sizes, and `<nviz>` 3D state -- none of which this plugin
+models, and all of which a generated file would drop. So it is parsed, the
+first display's layer list rebuilt, and the rest left as it stands; a
+surviving layer keeps its own task, a new one gets `d.rast`/`d.vect` with
+`map=`. ElementTree discards the doctype, so
+`<!DOCTYPE gxw SYSTEM "grass-gxw.dtd">` is written back by hand.
+
+What cannot be saved is named, not guessed: a layer that is not a map of that
+GRASS project (a file from disk, a basemap, a web layer), a view that will not
+project (the display's own extent is kept), and a workspace with no
+`<display>` (refused).
+
+**The stacking bug this turned up.** The first `<layer>` of a display is the
+**top** of the stack: GRASS writes its layer tree top first
+(`core/workspace.py` walks it from its first child) and draws it bottom first
+(`lmgr/layertree.py`'s `GetVisibleLayers` reverses the tree before rendering),
+so the first element is drawn last. RustGIS lists its layers top first too
+(`crates/map/src/lib.rs`: "in drawing order, top first") and `layer.addData`
+inserts at 0. Load Workspace added them in document order, so **every
+workspace came in upside down**; it loads from the bottom up now. Read out of
+GRASS's and RustGIS's own sources, not inferred.
+
 ### DONE — A ribbon press with nothing chosen opens the tree (0.11.0)
 
 **Add Map**, **Load Workspace** and **Browse Mapset** read the node chosen in

@@ -417,9 +417,48 @@ Two things it deliberately does **not** do:
   messages say the project's own name and file are untouched rather than implying a new one. A
   project with **unsaved changes stops the load** entirely, unless `{"discard": true}` says
   otherwise.
-- **It does not write back to the `.gxw`.** A workspace is read, never saved: layers added,
-  removed or reordered in RustGIS after the load stay in the RustGIS project, and the GRASS
-  workspace file is left exactly as it was.
+- **It does not write back to the `.gxw` it read.** **Save Workspace** writes a sibling, below.
+
+### Save Workspace writes a sibling, never the file GRASS owns
+
+**Save Workspace** puts the project's GRASS layers back into a workspace: which maps are in it,
+**in which order**, ticked or not, at what opacity, and the view as the display's extent. It
+writes `<name>_rustgis.gxw` beside the workspace that was loaded, and the GRASS GUI opens it like
+any other -- same project, same mapset.
+
+A script names the workspace by its path -- `{"workspace": "<path>.gxw"}`, for **Load Workspace**
+too, since a script cannot choose in a tree -- and `{"to": "<path>.gxw"}` chooses the target.
+Otherwise the workspace saved is the one loaded last, remembered between runs.
+
+It does **not** write the `.gxw` it read, and `to` is the only way to write anywhere else. Two reasons: the file is GRASS's own, and a GRASS GUI session holding it open
+**rewrites it on exit**, so an overwrite could be silently undone by the application that was
+already using it.
+
+**The original file's tree is edited, not regenerated.** A `.gxw` carries much more than this
+plugin models -- the GUI's `<layout>` panes and notebook, each layer's `<task>` with its `d.vect`
+colours, icons and sizes, `<nviz>` 3D state -- and building a file out of what the plugin
+understands would quietly drop all of it. So the file is parsed, the first display's layer list
+rebuilt, and everything else left as it stands: a layer still in the project keeps its own
+`<task>`, a layer new to the workspace gets the minimal one that draws it (`d.rast` or `d.vect`
+with `map=`), and a layer no longer there is dropped. ElementTree discards the doctype, so
+`<!DOCTYPE gxw SYSTEM "grass-gxw.dtd">` is written back by hand -- GRASS's own reader expects it.
+
+What cannot be saved is said rather than guessed at:
+
+| | |
+|---|---|
+| A layer that is not a map of that GRASS project | A file from disk, a basemap, a web layer: a `.gxw` names GRASS maps, so these are left out and listed by name |
+| RustGIS styling | A new layer gets `map=` and nothing invented; an existing one keeps the task GRASS wrote. Colours set in RustGIS have no general `.gxw` equivalent |
+| A view that will not project | The display's own extent is kept and a line says so, rather than failing a save whose layers are the point |
+| A workspace with no `<display>` | Refused: there is nothing to save layers into |
+
+**The stack is right way up.** The first `<layer>` of a display is the **top** of the stack:
+GRASS writes its layer tree top first (`core/workspace.py` walks it from its first child) and
+draws it bottom first (`lmgr/layertree.py`'s `GetVisibleLayers` reverses the tree before
+rendering), so the first element is drawn last. RustGIS also lists its layers top first, and
+`layer.addData` puts each new one on top -- so **Load Workspace** reads the layers from the
+bottom up, and **Save Workspace** writes them from the top down. Loading used to add them in
+document order, which turned the stack upside down.
 
 ### Imagery groups arrive composed, not as a stack of grey bands
 

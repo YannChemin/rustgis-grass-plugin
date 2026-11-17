@@ -388,9 +388,9 @@ COMMANDS = [
         "this project: its layers, its coordinate system and its extent. "
         "This replaces the current project.",
         "icon": "folder_open",
-        "params": '{"workspace"?: "workspace/<percent-encoded path>", '
-        '"discard"?: true} (without them the panel\'s tree chooses it, and a '
-        "project with unsaved changes stops the load)",
+        "params": '{"workspace"?: "<path>.gxw" or "workspace/<percent-encoded '
+        'path>", "discard"?: true} (without them the panel\'s tree chooses it, '
+        "and a project with unsaved changes stops the load)",
         "timeout": LONG_TIMEOUT,
     },
     {
@@ -644,7 +644,8 @@ PANEL = {
             "its maps, then a map, then Add Map. The workspaces found "
             "under the database and the home folder are listed first; "
             "choosing one and pressing Load Workspace opens it as this "
-            "project.",
+            "project, and Save Workspace writes the project's GRASS layers "
+            "to a copy of it.",
             "search": True,
             "command": "data-browse",
         },
