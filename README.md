@@ -8,20 +8,25 @@ bridge as a crate in the RustGIS tree.
 [GRASS_INTERFACE.md](GRASS_INTERFACE.md) is the survey of RustGIS's extension points this was
 designed from, written before the prototype and partly superseded by it.
 
-![RustGIS with the plugin's GRASS ribbon tab and its panel open, the panel on its Project & data
-tab listing the GRASS database's workspaces and projects, and the map showing the 25 layers of a
-GRASS workspace that was loaded](plugin_grassgis.png)
+![RustGIS with the plugin's GRASS ribbon tab and its panel open, the panel on its Modules tab
+showing the chosen layer, the computational region and the module catalogue, and the map showing
+the layers of a GRASS workspace that was loaded](plugin_grassgis.png)
 
 Above is the plugin's own **GRASS** ribbon tab: **GRASS** opens the panel, **Data** puts the
 GRASS database in RustGIS's browser, **Region** sets the computational region from the view, the
 layer or a box drawn on the map, **Terrain** runs the common raster modules in menus by theme,
 **Imagery** does the same for the imagery modules, **Vector** holds the 64 generated tools in
-nine themed menus, and **Modules** holds **Run Module** and the **Catalogue** filters. The panel
-is at the right, on the first of its three tabs.
+nine themed menus, and **Modules** holds **Run Module** and the **Catalogue** filters.
 
-The map is a **GRASS workspace** opened by the plugin -- `Basemap/default.gxw`, 25 layers -- and
-the layer list is the point of it: `mrds_trim`, `reefs`, `powerplantMW`, `mines` from the top
-down, two of them unticked, which is the workspace's own stack and its own `checked` flags.
+The panel is at the right, on the last of its three tabs, **Modules**, which carries the
+catalogue: **Runs from here (348)**, the modules this panel can drive, **All modules (1195)**,
+every one installed with its reason for not running here, and **Recently run**. Above them it
+keeps the chosen layer and the computational region in sight, because a run is about to use
+them.
+
+The map is a **GRASS workspace** opened by the plugin -- `Basemap/default.gxw` -- and its layer
+list is worth a look: `mrds_trim`, `reefs`, `powerplantMW`, `mines` from the top down, two of
+them unticked, which is the workspace's own stack and its own `checked` flags.
 
 GRASS is not bundled, linked or copied here. Each run spawns the `grass` launcher already
 installed on the machine, and every tool's form is read from that installation at build time with
