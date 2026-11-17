@@ -397,6 +397,23 @@ def workspace_node(path):
     return "workspace" + SEP + urllib.parse.quote(path, safe="")
 
 
+def is_workspace_node(node):
+    """Say whether a tree node id names a workspace file.
+
+    The commands that read the tree ask this before parsing, so that a press
+    with nothing or the wrong thing chosen can be answered with the tree and
+    an instruction rather than refused: see :func:`main.ask_in_tree`.
+    """
+    kind, _, quoted = (node or "").partition(SEP)
+    return kind == "workspace" and bool(quoted)
+
+
+def is_map_node(node):
+    """Say whether a tree node id names a map or an imagery group."""
+    parts = (node or "").split(SEP, 3)
+    return len(parts) == 4 and parts[0] in ("raster", "vector", "group")
+
+
 def parse_workspace_node(node):
     """Return the path a workspace node names.
 

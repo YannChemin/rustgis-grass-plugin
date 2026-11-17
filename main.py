@@ -266,6 +266,81 @@ def panel_answer(items=None, values=None, step=None):
     return out
 
 
+def ask_in_tree(chosen, what, press):
+    """Return the answer for a command that needs a choice in the data tree.
+
+    **Why this is not an error.** Add Map, Load Workspace and Browse Mapset
+    read the node chosen in the panel's GRASS Data tree, and they are on the
+    ribbon as well as in the panel. A ribbon button cannot be greyed out --
+    a command carries no runtime state -- and the tree is drawn by the
+    Project & data step alone, so pressing one of them from the ribbon with
+    another step showing, or with nothing chosen, used to answer nothing but
+    a red error telling the user to choose something they could not see.
+
+    So the press is taken as what it plainly means -- *I want to do this* --
+    and answered by putting the panel on the step where the choice is made,
+    with the tree in it, and saying what to choose there. The user's next
+    click is the one that works instead of the one that is refused again.
+
+    A plugin cannot open the panel itself: ``ui.pane.plugin`` is the host's
+    own command and plugins do not reach the ``ui.*`` family, so the line
+    also goes to the message log through ``host.notify`` for the case where
+    the panel is closed and the tab row cannot be seen.
+
+    :param chosen: the node that was chosen, if any
+    :param what: what the command needs, as "a workspace under Workspaces"
+    :param press: the button to press once it is chosen
+    """
+    said = f"Choose {what} in the GRASS Data tree below, then press {press}."
+    if chosen:
+        parts = str(chosen).split(database.SEP)
+        named = database.SEP.join(parts[1:]) or str(chosen)
+        said = (
+            f"{named} is not {what}. Choose {what} in the GRASS Data tree "
+            f"below, then press {press}."
+        )
+    call("host.notify", {"text": said})
+    items = database_panel(chosen)
+    items["status"] = {"text": said}
+    items["data-add"] = {"enabled": False}
+    items["data-workspace"] = {"enabled": False}
+    # The chosen node is set again only when there is one: RustGIS keeps a
+    # tree's value only while it was among the nodes last sent, and "" is no
+    # node, so sending it back would be answered with "1 value(s) not taken".
+    return {
+        "asked": said,
+        "messages": [said],
+        "panel": panel_answer(items, {"database": chosen} if chosen else None, "data"),
+    }
+
+
+def ask_for_module():
+    """Return the answer for Run Module pressed with no module chosen.
+
+    The counterpart of :func:`ask_in_tree` for the module catalogue: the
+    press answers the Modules step, with its tree, rather than a refusal
+    naming a module id that was never chosen (it said ``'None' is not a
+    module of this GRASS installation``).
+    """
+    said = "Choose a module in the Modules tab below, then press Run Module."
+    call("host.notify", {"text": said})
+    catalogue = load_catalogue().get("catalogue") or []
+    nodes, notes = raster.catalogue_tree(catalogue, None, raster.read_recents())
+    return {
+        "asked": said,
+        "messages": [said] + list(notes),
+        "panel": panel_answer(
+            {
+                "modules": {"nodes": nodes},
+                "status": {"text": said},
+                "run-module": {"enabled": False},
+            },
+            None,
+            "modules",
+        ),
+    }
+
+
 def database_panel(chosen=None, notes=()):
     """Return the panel items describing the GRASS database.
 
@@ -356,6 +431,12 @@ def browse_database(req):
     items["data-add"] = {"enabled": named}
     # Load Workspace is only worth pressing for a workspace that can open.
     items["data-workspace"] = {"enabled": workspace and workspace_ready}
+    # Pressed from the ribbon with nothing chosen, the whole answer is a tree
+    # the user may not be looking at -- the panel can be closed, and a plugin
+    # cannot open it. The line goes to the message log too, so the press says
+    # something wherever it was made from.
+    if not database.opened(chosen):
+        call("host.notify", {"text": said})
     # Its whole answer is the database tree, which only this step draws, so a
     # Browse Mapset pressed from the ribbon has to bring the panel here.
     return {"panel": panel_answer(items, {"database": chosen}, "data")}
@@ -403,6 +484,8 @@ def load_workspace(req):
     values = panel_values(req)
     params = req.get("params") or {}
     chosen = params.get("workspace") or values.get("database")
+    if not database.is_workspace_node(chosen):
+        return ask_in_tree(chosen, "a workspace under Workspaces", "Load Workspace")
     path = database.parse_workspace_node(chosen)
     workspace = database.read_workspace(path)
     if not workspace:
@@ -588,7 +671,10 @@ def add_map(req):
     # tree cannot set it. Naming the map in the command's own parameters is
     # the way in for the command line, for Python and for scripts.
     asked = (req.get("params") or {}).get("map")
-    kind, project, mapset, name = database.parse_node(asked or values.get("database"))
+    chosen = asked or values.get("database")
+    if not database.is_map_node(chosen):
+        return ask_in_tree(chosen, "a map or an imagery group", "Add Map")
+    kind, project, mapset, name = database.parse_node(chosen)
     # A raster goes out as a GeoTIFF and a vector as a GeoPackage, which both
     # carry the coordinate system RustGIS then reads them in.
     target = raster.output_path(f"{project}_{mapset}", name)
@@ -940,7 +1026,13 @@ def run_module(req, module=None):
     values = with_params(panel_values(req), req.get("params"))
     catalogue = load_catalogue().get("catalogue") or []
     asked = (req.get("params") or {}).get("module")
-    entry = raster.entry_for(catalogue, module or asked or values.get("modules"))
+    chosen = module or asked or values.get("modules")
+    if not chosen:
+        # Run Module is on the ribbon too, where the module tree cannot be
+        # seen: the press means "run one", so it answers the catalogue on the
+        # step that draws it, as the tree commands do. See ask_in_tree.
+        return ask_for_module()
+    entry = raster.entry_for(catalogue, chosen)
     if not entry.get("runnable"):
         if entry.get("mapset_runnable"):
             return run_module_in_mapset(catalogue, entry, values)

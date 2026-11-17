@@ -8,12 +8,12 @@ which is several screens of scrolling with four trees in it.
 So the panel is a three-step workflow instead, in the order the work is done:
 a GRASS project and its maps, then the map layer and the computational
 region, then the module catalogue and its form. A ``tabs`` row at the top
-chooses the step and every answer sets ``visible`` from it, so at most eight
+chooses the step and every answer sets ``visible`` from it, so at most ten
 widgets are drawn at once. The steps are declared here because the manifest
 generator and the protocol loop have to agree on them.
 
 There was a fourth step, Terrain, holding a viewpoint pick and the parameters
-of three shaped runs (Slope, Aspect, Viewshed). It went in 0.12.0: those are
+of three shaped runs (Slope, Aspect, Viewshed). It went in 0.11.0: those are
 ``r.slope.aspect`` and ``r.viewshed``, which Run Module drives from the module
 tree with their whole GRASS form, including ``r.viewshed``'s required
 ``coordinates``. A hand-made subset of a module's parameters is worth keeping

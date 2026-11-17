@@ -17,7 +17,7 @@ top, because GRASS needs them in this order:
 
 | Tab | What it holds |
 |---|---|
-| `data` | the GRASS database tree, **Add Map**, **GRASS Database** |
+| `data` | the GRASS database tree, **Add Map**, **Load Workspace**, **Browse Mapset**, **GRASS Database** |
 | `layer` | the raster layer, its band, the computational region and the cell size |
 | `modules` | the **Catalogue** filter, the module tree, **Chosen module**, the form, **Run Module** |
 
@@ -141,16 +141,28 @@ plugin:grass-vector/region-box={"panel": {"region-box": {"bbox": [-2.0, 47.0, -1
 - Choosing a layer runs `layer-pick` and choosing a module runs `module-pick`: each
   answers only what it changed, so neither sends the catalogue back. **Run Module** is
   disabled for a module this panel cannot drive, and **Chosen module** says why.
+- **Add Map, Load Workspace and Browse Mapset are panel buttons, not ribbon ones.**
+  Each acts on the node chosen in the Data tree, so the ribbon (where no tree is in
+  sight, and where a button cannot be greyed out) was the wrong place for them. They
+  are still commands: name the thing in the command's own parameters
+  (`{"map": ...}`, `{"workspace": ...}`, `{"mapset": ...}`) and a script runs them
+  without touching the panel. Pressed with nothing chosen they answer the Data tree
+  and say what to choose; **Run Module** does the same with the catalogue.
 - **A GRASS workspace (`.gxw`) opens as a ready-made project.** The panel's Data tree
   lists the workspaces found in the GRASS database and under the home folder *above*
   the projects, labelled by the project and mapset they open and their layer count.
   **Load Workspace** loads every raster and vector of the workspace's first map
   display, keeps a layer the workspace had unticked loaded but **not drawn**, puts the
   view in the GRASS project's coordinate system and frames the workspace's own extent.
-  Tell the user two things when they ask for it: it **clears the project's layers**
-  (and refuses outright if the project has unsaved changes, unless `discard` is
-  passed), and it does **not** replace the project itself -- a plugin may not, so the
-  project's name and file are unchanged. Reach it from a script with
+  Tell the user three things when they ask for it: **make an empty RustGIS project
+  first** (the Project button at the left of the ribbon, then New Project > Map),
+  because RustGIS opens on the World Atlas sample and loading a workspace **clears
+  the layers of whatever project it is loaded into** (and refuses outright if that
+  project has unsaved changes, unless `discard` is passed); it does **not** replace
+  the project itself -- a plugin may not, so the project's name and file are
+  unchanged, and the empty project is the user's own click; and it is **read-only
+  towards the `.gxw`** -- layers added, removed or reordered afterwards stay in the
+  RustGIS project and the workspace file is left as it was. Reach it from a script with
   `{"workspace": "workspace/<percent-encoded path>", "discard"?: true}`; the path is
   percent-encoded because a node id is built with `/`.
 

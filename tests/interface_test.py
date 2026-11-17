@@ -1627,3 +1627,64 @@ def test_a_parameter_taking_several_numbers_is_a_text_field():
         next(f for f in interface.form_fields(one) if f["id"] == "threshold")["kind"]
         == "number"
     )
+
+
+def test_a_ribbon_press_with_nothing_chosen_opens_the_tree_instead_of_refusing(
+    monkeypatch, tmp_path
+):
+    """Add Map and Load Workspace are on the ribbon, where no tree can be seen.
+
+    A command carries no runtime state, so a ribbon button cannot be greyed
+    out, and the GRASS Data tree is drawn by one step of the panel. Pressed
+    with nothing chosen, these used to answer a red error naming a tree the
+    user was not looking at; they answer the tree itself now, on the step
+    that draws it, with the line saying what to choose.
+    """
+    import main
+
+    said = []
+    monkeypatch.setattr(main, "call", lambda op, params=None: said.append(params) or {})
+    monkeypatch.setattr(main.database, "gisdbase", lambda: str(tmp_path))
+
+    for handler, press in (
+        (main.load_workspace, "Load Workspace"),
+        (main.add_map, "Add Map"),
+    ):
+        out = handler({"params": {}, "panel": {"values": {}}})
+        panel_out = out["panel"]
+        assert panel_out["values"]["step"] == "data"
+        assert panel_out["items"]["database"]["visible"] is True
+        assert press in out["asked"] and press in panel_out["items"]["status"]["text"]
+        assert panel_out["items"]["data-add"]["enabled"] is False
+    # The panel can be closed, and a plugin cannot open it, so the line is in
+    # the message log as well.
+    assert any(press in (params or {}).get("text", "") for params in said)
+
+
+def test_a_ribbon_press_on_the_wrong_node_names_what_was_chosen(monkeypatch, tmp_path):
+    import main
+
+    monkeypatch.setattr(main, "call", lambda op, params=None: {})
+    monkeypatch.setattr(main.database, "gisdbase", lambda: str(tmp_path))
+    node = main.database.mapset_node("Normandie/PERMANENT")
+    out = main.load_workspace({"params": {}, "panel": {"values": {"database": node}}})
+    assert (
+        "Normandie" in out["asked"] and "a workspace under Workspaces" in out["asked"]
+    )
+
+
+def test_run_module_with_nothing_chosen_opens_the_catalogue(monkeypatch, tmp_path):
+    """It said "'None' is not a module of this GRASS installation" before."""
+    import main
+
+    said = []
+    monkeypatch.setattr(main, "call", lambda op, params=None: said.append(params) or {})
+    monkeypatch.setattr(main, "load_catalogue", lambda: {"catalogue": []})
+    monkeypatch.setattr(main.raster, "read_recents", lambda *a, **k: [])
+    out = main.run_module({"params": {}, "panel": {"values": {}}})
+    panel_out = out["panel"]
+    assert panel_out["values"]["step"] == "modules"
+    assert panel_out["items"]["modules"]["visible"] is True
+    assert panel_out["items"]["run-module"]["enabled"] is False
+    assert "Run Module" in out["asked"]
+    assert any("Run Module" in (params or {}).get("text", "") for params in said)

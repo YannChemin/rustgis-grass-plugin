@@ -593,18 +593,19 @@ VECTOR_KEYWORDS = {
 #:
 #: RustGIS draws a panel as one flat column with no sections, so everything
 #: GRASS needs came to 24 widgets and several screens of scrolling, four trees
-#: among them. The `step` dropdown and `grass_bridge.panel` turn that into four
-#: steps in the order the work is done -- project, layer and region, terrain,
-#: modules -- and every answer sets `visible` from the step, so at most eight
+#: among them. The `step` tab row and `grass_bridge.panel` turn that into three
+#: steps in the order the work is done -- project and data, layer and region,
+#: modules -- and every answer sets `visible` from the step, so at most ten
 #: widgets are drawn at once. The declaration order below is the order within a
 #: step, since the widgets of the other steps are filtered out before drawing.
+#:
+#: The panel declares no `help`: RustGIS draws it as a paragraph above the
+#: widgets, and a sentence naming the three steps said no more than the tab row
+#: itself does, for several lines of the panel's height.
 PANEL = {
     "title": "GRASS GIS",
     "icon": "stats",
-    "help": "Four steps, in the order the work is done: choose a GRASS project "
-    "and add its maps, choose the map layer and the computational region, run "
-    "the shaped terrain modules, then find any of the installed modules and "
-    "run it with its own form.",
+    "help": "",
     "state": "raster-state",
     "items": [
         {
@@ -1172,22 +1173,21 @@ def tab(tools, raster_menus=None, imagery_menus=None):
     The panel is declared once, not in three groups; the three catalogue
     filters are in a menu rather than on the top level, because they set what
     the panel's tree lists instead of running anything.
+
+    **Add Map, Load Workspace and Browse Mapset are not here.** Each reads the
+    node chosen in the panel's GRASS Data tree, and a ribbon button cannot be
+    greyed out for want of one, because a command carries no runtime state. On
+    the ribbon they could only ever be pressed blind -- the tree they read is
+    in the panel, which a plugin cannot even open -- so they are buttons of
+    the panel alone, beside the tree whose choice they act on. GRASS Database
+    stays: it needs nothing chosen.
     """
     menus, _ = vector_menus(tools)
     return {
         "label": "GRASS",
         "groups": [
             {"label": "GRASS", "items": ["panel"]},
-            {
-                "label": "Data",
-                "layout": "small",
-                "items": [
-                    "data-folder",
-                    "data-add",
-                    "data-workspace",
-                    "data-browse",
-                ],
-            },
+            {"label": "Data", "layout": "small", "items": ["data-folder"]},
             {
                 "label": "Region",
                 "layout": "small",

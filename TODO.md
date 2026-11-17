@@ -404,6 +404,49 @@ carries an icon of its own. `minRustgisVersion` is 0.6.0, because the panel's
 `form` and `choice` items came after 0.5.0 and an unknown panel item kind is a
 hard manifest error. `UX_REFACTOR.md` is the survey this came from.
 
+### DONE — A ribbon press with nothing chosen opens the tree (0.11.0)
+
+**Add Map**, **Load Workspace** and **Browse Mapset** read the node chosen in
+the panel's GRASS Data tree, and all three are on the ribbon as well as in the
+panel. A ribbon button cannot be greyed out -- a command carries no runtime
+state -- and the tree is drawn by the Project & data step alone, so a press
+from the ribbon with another tab showing, or with nothing chosen, answered a
+red error naming a tree the user could not see:
+
+```
+Load Workspace: choose a GRASS workspace under Workspaces, not a project or a map
+Add Map: choose a map or an imagery group in the GRASS Data tree, not a project or a mapset
+```
+
+**They are off the ribbon now**, by the user's call: a press from there could
+only ever be blind, and the panel's own buttons sit beside the tree whose
+choice they act on. The Data group keeps **GRASS Database**, which needs
+nothing chosen. **Run Module** stays, being the point of the tab, and answers
+a press with no module chosen by showing the catalogue on the Modules tab
+(`main.ask_for_module`), where it used to say `'None' is not a module of this
+GRASS installation`. All four are still commands, so a script reaches them
+with `map`, `workspace`, `mapset` or `module` in the parameters.
+
+For a press made while the panel is open, the press is also taken as what it
+means (`main.ask_in_tree`): the panel is put
+on the step that draws the tree, with the tree in it, and the line says what
+to choose and which button to press after. Where something wrong was chosen it
+is named (`Normandie/PERMANENT is not a workspace under Workspaces`). The
+chosen node is only sent back when there is one, because RustGIS keeps a
+tree's value only while it was among the nodes last sent and `""` is no node.
+
+**A plugin cannot open its own panel.** `ui.pane.plugin` is the host's own
+command, the `ui.*` family is not reachable from a plugin (RustGIS refuses it
+to scripts by the same rule), and a command's `panel` answer updates the
+stored state without showing the pane. So the line goes to the message log
+through `host.notify` as well, which is all a press can do when the panel is
+closed. Removing the three from the ribbon would be the alternative; they are
+genuine shortcuts once the panel is open, so they stay.
+
+Verified through `rustgis-cli` on the real database: each of the three presses
+answers the line and leaves the panel on `data`, and `data-workspace` with a
+workspace named in its parameters still loads it (`Basemap`, 25 layers).
+
 ### DONE — Three tabs, and the curated terrain runs removed (0.11.0)
 
 The fourth step held **Slope**, **Aspect** and **Viewshed**: three curated runs

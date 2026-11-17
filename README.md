@@ -11,8 +11,8 @@ designed from, written before the prototype and partly superseded by it.
 ![RustGIS with the plugin's own GRASS ribbon tab open, showing the GRASS, Data, Region, Terrain,
 Imagery and Vector groups above the World Atlas sample map](plugin_grassgis.png)
 
-Above is the plugin's own **GRASS** ribbon tab: **GRASS** opens the panel, **Data** reaches the
-GRASS database and adds a map or an imagery group from it, **Region** sets the computational
+Above is the plugin's own **GRASS** ribbon tab: **GRASS** opens the panel, **Data** puts the
+GRASS database in the browser, **Region** sets the computational
 region from the view, the layer or a box drawn on the map, **Terrain** runs the common raster
 modules in menus by theme, **Imagery** does the same for the
 imagery modules, and **Vector** holds the 64 generated tools in nine themed menus. **Modules**,
@@ -103,7 +103,7 @@ ten of its 20 widgets are drawn at once**:
 
 | Tab | Holds |
 |---|---|
-| **Project & data** | the GRASS database, Projects and mapsets, Add Map, GRASS Database |
+| **Project & data** | the GRASS database tree (projects, mapsets, maps and workspaces), **Add Map**, **Load Workspace**, **Browse Mapset**, **GRASS Database** |
 | **Layer & region** | the raster layer, the band sent to GRASS, the computational region, Region = Map View / Whole Layer / **from a Box**, the cell size |
 | **Modules** | the Catalogue filter, the module tree, Chosen module, Module parameters, Run Module |
 
@@ -142,6 +142,16 @@ database of 60 projects, over the plugin's own protocol:
 
 The **Catalogue** filter was a three-node tree inside a 320 px scroll area; it is a dropdown.
 
+**Three buttons left the ribbon.** *Add Map*, *Load Workspace* and *Browse Mapset* each read the
+node chosen in the panel's **GRASS Data** tree. A ribbon button cannot be greyed out for want of
+one -- a command carries no runtime state -- and the tree they read is in the panel, which a
+plugin cannot open (`ui.pane.plugin` is the host's own command and the `ui.*` family is not
+reachable from a plugin). On the ribbon they could only be pressed blind, so they are buttons of
+the panel alone now, beside the tree whose choice they act on. **GRASS Database** stays, because
+it needs nothing chosen. **Run Module** stays as well, being the point of the tab: pressed with
+no module chosen it answers the catalogue on the Modules tab and says to choose one, where it
+used to answer `'None' is not a module of this GRASS installation`.
+
 ### Its own tab
 
 The plugin has a **GRASS** tab rather than a group on **Plugins**, which had grown to 15 buttons
@@ -151,7 +161,7 @@ an icon of its own:
 | Group | Holds |
 |---|---|
 | GRASS | the panel |
-| Data | GRASS Database, Add Map, Browse Mapset |
+| Data | GRASS Database |
 | Region | Region = Map View, Region = Whole Layer, Region = Box, Refresh Rasters |
 | Terrain | menus of raster modules: Terrain, Hydrology, Filters, Surfaces, Sun |
 | Imagery | menus of imagery modules: Enhance, Preprocess, Detect, Geometry |
@@ -378,6 +388,15 @@ way the module tree lists a module it cannot run. A file that was found and cann
 worth seeing with its reason; leaving it out would only raise the question of whether the scan
 missed it.
 
+**Start from an empty RustGIS project.** Loading a workspace **clears the layers of the project
+it is loaded into**, because a workspace *is* a set of layers and merging two sets would give
+neither. RustGIS opens on the **World Atlas** sample -- countries, cities, rivers and lakes --
+so the first thing to do is make an empty project and load the workspace into that: the
+**Project** button at the left of the ribbon opens the start screen, where **New Project > Map**
+gives a blank map. Loading into a project with unsaved changes is refused outright; loading into
+the sample removes its layers and reports how many went. The plugin cannot do this step for you,
+because `project.new` carries RustGIS's `Replaces` effect, which is reserved to the user.
+
 **Load Workspace** then opens one:
 
 | | |
@@ -392,11 +411,15 @@ Two things it deliberately does **not** do:
 - **It is not loaded by clicking the name.** Clicking selects it and says what will happen; the
   button does it. Loading clears the project's layers, and losing work to a mis-click in a tree
   is not something to do quietly.
-- **It does not replace the project.** `project.new` carries RustGIS's `Replaces` effect, which
-  is reserved: a plugin may not replace someone's project, by design. What the plugin may do is
-  clear the layers, which is what it does, and the messages say the project's own name and file
-  are untouched rather than implying a new one. A project with **unsaved changes stops the load**
-  entirely, unless `{"discard": true}` says otherwise.
+- **It does not replace the project**, so it cannot make the empty one for you. `project.new`
+  carries RustGIS's `Replaces` effect, which is reserved: a plugin may not replace someone's
+  project, by design. What the plugin may do is clear the layers, which is what it does, and the
+  messages say the project's own name and file are untouched rather than implying a new one. A
+  project with **unsaved changes stops the load** entirely, unless `{"discard": true}` says
+  otherwise.
+- **It does not write back to the `.gxw`.** A workspace is read, never saved: layers added,
+  removed or reordered in RustGIS after the load stay in the RustGIS project, and the GRASS
+  workspace file is left exactly as it was.
 
 ### Imagery groups arrive composed, not as a stack of grey bands
 

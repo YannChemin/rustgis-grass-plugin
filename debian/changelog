@@ -1,5 +1,36 @@
 rustgis-grass-plugin (0.11.0) unstable; urgency=medium
 
+  * The README says plainly that a workspace is loaded into an empty RustGIS
+    project: loading clears the layers of the project it is loaded into, and
+    RustGIS opens on the World Atlas sample, so the empty project (Project >
+    New Project > Map) comes first. A plugin cannot make it, project.new being
+    reserved to the user. It also says that the .gxw is only read, never
+    written back.
+  * Add Map, Load Workspace and Browse Mapset are off the ribbon. Each reads
+    the node chosen in the panel's GRASS Data tree, a ribbon button cannot be
+    greyed out for want of one (a command carries no runtime state), and the
+    tree is in the panel, which a plugin cannot open: ui.pane.plugin is the
+    host's own command and the ui.* family is not reachable from a plugin. So
+    on the ribbon they could only be pressed blind. They are buttons of the
+    panel alone now, beside the tree whose choice they act on, and the Data
+    group holds GRASS Database, which needs nothing chosen. The three are
+    still commands, so a script reaches them as before.
+  * Run Module stays on the ribbon, being the point of the tab, and answers a
+    press with no module chosen by showing the catalogue on the Modules tab
+    and saying to choose one. It used to answer "'None' is not a module of
+    this GRASS installation".
+  * Add Map, Load Workspace and Browse Mapset pressed with nothing chosen
+    answer the GRASS Data tree, on the step that draws it, with a line saying
+    what to choose there; they refused the press with a red error before. All
+    three read the node chosen in that tree and all three are on the ribbon as
+    well as in the panel, where a button cannot be greyed out (a command
+    carries no runtime state) and the tree is not in sight, so the error named
+    a tree the user was not looking at. The line also goes to the message log,
+    because a plugin cannot open its own panel: ui.pane.plugin is the host's
+    command and plugins do not reach the ui.* family.
+  * The panel declares no help paragraph. RustGIS draws a panel's help above
+    its widgets, and a sentence naming the three steps said no more than the
+    tab row below it does, for several lines of the panel's height.
   * The panel is three tabs instead of one column of 24 widgets. RustGIS draws
     a panel as a flat list with no sections, so everything GRASS needs -- the
     database, the layer and region, three curated terrain runs and the module
