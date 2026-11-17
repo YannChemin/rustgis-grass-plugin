@@ -1505,3 +1505,90 @@ def test_a_vector_module_is_pointed_at_the_tools_pane():
         }
     )
     assert "not among them" in missed
+
+
+def _gxw(tmp_path, layers=("one@PERMANENT", "two@PERMANENT")):
+    """Write a small workspace file and return its path."""
+    body = "\n".join(
+        f'        <layer type="raster" name="{name}" checked="1" opacity="1.000000">\n'
+        f'            <task name="d.rast">\n'
+        f'                <parameter name="map"><value>{name}</value></parameter>\n'
+        f'                <parameter name="bgcolor"><value>none</value></parameter>\n'
+        f"            </task>\n"
+        f"        </layer>"
+        for name in layers
+    )
+    text = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<!DOCTYPE gxw SYSTEM "grass-gxw.dtd">\n'
+        "<gxw>\n"
+        "    <session>\n"
+        "        <database>/nowhere</database>\n"
+        "        <location>Proj</location>\n"
+        "        <mapset>PERMANENT</mapset>\n"
+        "    </session>\n"
+        "    <layout><panes>keep me</panes></layout>\n"
+        '    <display name="Map Display 1" extent="1.0,2.0,3.0,4.0,0.0,1.0">\n'
+        f"{body}\n"
+        "    </display>\n"
+        "</gxw>\n"
+    )
+    path = tmp_path / "default.gxw"
+    path.write_text(text, encoding="utf-8")
+    return str(path)
+
+
+def test_a_saved_workspace_is_a_sibling_not_the_file_grass_owns(tmp_path):
+    path = _gxw(tmp_path)
+    target = database.saved_path(path)
+    assert target.endswith("default_rustgis.gxw")
+    database.write_workspace(
+        path,
+        target,
+        [{"map": "two", "mapset": "PERMANENT", "kind": "raster", "shown": False}],
+    )
+    # The original is untouched, to the byte.
+    assert database.read_workspace(path)["layers"][0]["map"] == "one"
+    assert len(database.read_workspace(path)["layers"]) == 2
+    saved = database.read_workspace(target)
+    assert [layer["map"] for layer in saved["layers"]] == ["two"]
+    assert saved["layers"][0]["shown"] is False
+    # Writing over the file it read is refused, whatever is asked.
+    with pytest.raises(session.GrassError, match="never the file GRASS owns"):
+        database.write_workspace(path, path, [])
+
+
+def test_a_saved_workspace_keeps_what_the_plugin_does_not_model(tmp_path):
+    """A .gxw holds the GUI's layout and each layer's own drawing task."""
+    path = _gxw(tmp_path)
+    target = database.saved_path(path)
+    database.write_workspace(
+        path,
+        target,
+        [
+            {"map": "two", "mapset": "PERMANENT", "kind": "raster", "shown": True},
+            {"map": "new", "mapset": "PERMANENT", "kind": "vector", "shown": True},
+        ],
+        extent=[10.0, 20.0, 30.0, 40.0],
+    )
+    with open(target, encoding="utf-8") as f:
+        text = f.read()
+    assert '<!DOCTYPE gxw SYSTEM "grass-gxw.dtd">' in text
+    assert "<panes>keep me</panes>" in text
+    # The kept layer brought its own task along, bgcolor and all.
+    assert "bgcolor" in text
+    # The new one got the module that draws its kind, and nothing invented.
+    assert 'name="d.vect"' in text
+    # Six numbers: the box written, the height range kept.
+    assert 'extent="10.000000,20.000000,30.000000,40.000000,0.0,1.0"' in text
+
+
+def test_a_workspace_with_no_display_is_not_written_over(tmp_path):
+    path = tmp_path / "bare.gxw"
+    path.write_text(
+        '<?xml version="1.0"?><gxw><session><database>/d</database>'
+        "<location>P</location><mapset>PERMANENT</mapset></session></gxw>",
+        encoding="utf-8",
+    )
+    with pytest.raises(session.GrassError, match="no map display"):
+        database.write_workspace(str(path), str(tmp_path / "out.gxw"), [])

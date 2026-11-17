@@ -62,6 +62,7 @@ STEP_ITEMS = {
         "database",
         "data-add",
         "data-workspace",
+        "data-save",
         "data-folder",
     ),
     "layer": (

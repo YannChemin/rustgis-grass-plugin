@@ -442,6 +442,119 @@ def browse_database(req):
     return {"panel": panel_answer(items, {"database": chosen}, "data")}
 
 
+def save_workspace(req):
+    """Write the project's GRASS layers to a workspace beside the one loaded.
+
+    **It never writes the ``.gxw`` it read.** A GRASS GUI session holding
+    that file open rewrites it on exit and would silently undo this, and the
+    file is GRASS's own; the copy is ``<name>_rustgis.gxw`` in the same
+    folder, the same project with the same layers, which the GRASS GUI opens
+    like any other. ``{"to": "<path>.gxw"}`` names another file.
+
+    What is saved is the stack as RustGIS now has it: which GRASS maps are
+    in it, in which order, ticked or not, at what opacity, and the view as
+    the display's extent. A layer that is not a GRASS map of that project --
+    a file added from disk, a basemap, a web layer -- has no name a ``.gxw``
+    can carry, so it is left out and named in the messages.
+
+    The rest of the file is kept as it was, down to each surviving layer's
+    own ``d.vect`` colours: see :func:`grass_bridge.database.write_workspace`.
+    """
+    params = req.get("params") or {}
+    values = panel_values(req)
+    base = database.gisdbase()
+    if not base:
+        raise session.GrassError("no GRASS database was found")
+    asked = params.get("workspace") or ""
+    path = asked if asked.lower().endswith(".gxw") else ""
+    if not path and asked:
+        path = database.parse_workspace_node(database.workspace_node(asked))
+    chosen = values.get("database")
+    if not path and database.is_workspace_node(chosen):
+        path = database.parse_workspace_node(chosen)
+    path = path or database.last_loaded()
+    if not path:
+        return ask_in_tree(chosen, "a workspace under Workspaces", "Save Workspace")
+    workspace = database.read_workspace(path)
+    if not workspace:
+        raise session.GrassError(f"{path} is not a readable GRASS workspace")
+    where, project = database.workspace_place(path, workspace, base)
+    if not where:
+        raise session.GrassError(
+            f"{workspace['project']}/{workspace['mapset']} is on none of the "
+            "databases this workspace could be on, so its maps cannot be "
+            "checked; nothing was written"
+        )
+
+    kept, left_out = [], []
+    for layer in call("host.layers") or []:
+        name = str(layer.get("name") or "")
+        map_name, _, mapset = name.partition("@")
+        kind = (
+            database.map_kind(where, project, mapset, map_name)
+            if mapset and map_name
+            else ""
+        )
+        if not kind:
+            left_out.append(name or "a layer with no name")
+            continue
+        kept.append(
+            {
+                "map": map_name,
+                "mapset": mapset,
+                "kind": kind,
+                "shown": layer.get("visible", True),
+                # RustGIS keeps transparency, a .gxw keeps opacity.
+                "opacity": 1.0 - float(layer.get("transparency") or 0.0),
+            }
+        )
+    if not kept:
+        raise session.GrassError(
+            f"none of the project's layers is a map of {project}: a .gxw "
+            "names GRASS maps, so there is nothing to write"
+        )
+
+    extent = None
+    view = call("host.view") or {}
+    box = view.get("extent")
+    if box:
+        try:
+            with session.Run(progress=progress) as run:
+                extent = run.from_degrees(os.path.join(where, project), box)
+        except session.GrassError as e:
+            # The layers are the point; a view that cannot be projected is
+            # worth a line, not a refusal.
+            left_out.append(f"the view's extent ({e})")
+
+    target = params.get("to") or database.saved_path(path)
+    database.write_workspace(path, target, kept, extent)
+    saved_as = (
+        f"{len(kept)} layer(s) saved to {target}, which opens in the GRASS "
+        f"GUI as {project}/{workspace['mapset']}."
+    )
+    messages = [saved_as]
+    if extent is None and box:
+        messages.append("The display's own extent was kept.")
+    if left_out:
+        messages.append(f"Not saved, having no place in a .gxw: {', '.join(left_out)}.")
+    messages.append(f"{path} itself was not touched.")
+    for text in messages:
+        log(text)
+    call("host.notify", {"text": messages[0]})
+    return {
+        "saved": target,
+        "messages": messages,
+        "panel": panel_answer(
+            {
+                **database_panel(chosen),
+                "status": {"text": messages[0]},
+            },
+            None,
+            "data",
+        ),
+    }
+
+
 def add_folder(req):
     """Put the GRASS database in RustGIS's browser, under Folders.
 
@@ -558,7 +671,13 @@ def load_workspace(req):
     loaded, failed = 0, []
     with database.Export(progress=progress) as run:
         epsg = run.crs(base, workspace["project"])
-        for layer in workspace["layers"]:
+        # The first <layer> of a display is the top of the stack: GRASS's
+        # layer tree is written top first (core/workspace.py walks it from
+        # its first child) and drawn bottom first (lmgr/layertree.py's
+        # GetVisibleLayers reverses the tree order before rendering).
+        # RustGIS keeps its layers top first too and layer.addData puts each
+        # new one on top, so the workspace is loaded from the bottom up.
+        for layer in reversed(workspace["layers"]):
             name, mapset, kind = layer["map"], layer["mapset"], layer["kind"]
             target = raster.output_path(f"{workspace['project']}_{mapset}", name)
             if kind == "vector":
@@ -593,6 +712,9 @@ def load_workspace(req):
         messages.append(f"Not loaded - {text}")
     messages += harmonise_projection(epsg, workspace["project"], False)
     messages += frame_workspace(base, workspace)
+    # Save Workspace saves the one that was loaded, which the tree may no
+    # longer be on by the time the layers have been worked with.
+    database.remember_loaded(path)
 
     for text in messages:
         log(text)
@@ -1464,6 +1586,8 @@ def run_command(req):
         return add_map(req)
     if command == "data-workspace":
         return load_workspace(req)
+    if command == "data-save":
+        return save_workspace(req)
     if command == "region-view":
         return set_region(req, "view")
     if command == "region-full":

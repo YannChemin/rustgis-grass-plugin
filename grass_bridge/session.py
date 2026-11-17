@@ -485,6 +485,43 @@ class Run:
             raise GrassError("the extent has no area once in longitude and latitude")
         return box
 
+    def from_degrees(self, project, extent):
+        """Return ``[west, south, east, north]`` in a project's own system.
+
+        The inverse of :meth:`to_degrees`, for writing a RustGIS view back
+        into a file that holds GRASS coordinates. All four corners are
+        projected again, for the same reason: a box in degrees is not a box
+        in a projected system.
+
+        :param project: the project's path
+        :param extent: ``[west, south, east, north]`` in degrees
+        :raises GrassError: when m.proj cannot place a corner
+        """
+        west, south, east, north = (float(value) for value in extent)
+        xs, ys = [], []
+        for lon, lat in ((west, south), (west, north), (east, south), (east, north)):
+            out = self.exec(
+                project,
+                "m.proj",
+                "-i",
+                "-d",
+                f"coordinates={lon},{lat}",
+                "separator=comma",
+            )
+            parts = (out.strip().splitlines() or [""])[0].split(",")
+            try:
+                xs.append(float(parts[0]))
+                ys.append(float(parts[1]))
+            except (IndexError, ValueError) as e:
+                raise GrassError(
+                    f"m.proj could not put {lon},{lat} into the project's "
+                    f"coordinates (it answered {out.strip()!r})"
+                ) from e
+        box = [min(xs), min(ys), max(xs), max(ys)]
+        if box[0] >= box[2] or box[1] >= box[3]:
+            raise GrassError("the extent has no area once in the project's system")
+        return box
+
     def _region(self, project):
         """Return ``g.region -g`` as a dictionary."""
         try:

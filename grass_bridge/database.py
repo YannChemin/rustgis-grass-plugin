@@ -19,6 +19,7 @@ SPDX-License-Identifier: Unlicense
 """
 
 import fnmatch
+import json
 import os
 import subprocess
 import urllib.parse
@@ -815,3 +816,170 @@ class Export(session.Run):
                 raise session.GrassError(f"{step[0]}: {session._why(out)}")
             for text in session._warnings(out.stderr or ""):
                 self.warnings[text] = self.warnings.get(text, 0) + 1
+
+
+#: What the plugin writes a workspace to, beside the one it was read from.
+SAVED_SUFFIX = "_rustgis.gxw"
+
+#: The GRASS display module that draws each kind of map, for a layer the
+#: workspace did not already have.
+DRAWN_BY = {"raster": "d.rast", "vector": "d.vect"}
+
+
+def saved_path(path):
+    """Return the file a workspace read from ``path`` is saved to.
+
+    The plugin never writes the ``.gxw`` it read. A GRASS GUI session holding
+    that file open rewrites it on exit and would silently win, and the file is
+    GRASS's own; a sibling leaves the original exactly as it was and still
+    opens in the GRASS GUI, being the same project and the same layers.
+    """
+    stem = path[: -len(".gxw")] if path.lower().endswith(".gxw") else path
+    return stem + SAVED_SUFFIX
+
+
+def map_kind(base, project, mapset, name):
+    """Return ``"raster"``, ``"vector"`` or "" for one map of a mapset.
+
+    Read from the file system, as :func:`maps` does: a raster is a file in
+    the mapset's ``cellhd``, a vector a folder in its ``vector``.
+    """
+    where = os.path.join(base, project, mapset)
+    if os.path.isfile(os.path.join(where, "cellhd", name)):
+        return "raster"
+    if os.path.isdir(os.path.join(where, "vector", name)):
+        return "vector"
+    return ""
+
+
+def write_workspace(path, target, layers, extent=None):
+    """Write ``path``'s workspace to ``target`` with ``layers`` in it.
+
+    **The original file's own tree is edited, not replaced.** A ``.gxw``
+    carries far more than the plugin understands -- the ``<layout>`` panes
+    and notebook of the GRASS GUI, each layer's ``<task>`` with its
+    ``d.vect`` colours, icons and sizes, ``<nviz>`` 3D state -- and
+    generating a file from what this plugin models would quietly drop all of
+    it. So the file is parsed, its first display's layer list rebuilt from
+    ``layers``, and everything else left as it stands. A layer that is still
+    there keeps its own ``<task>``; one that is new gets the minimal task
+    that draws it.
+
+    The layer order is the stack from the top down, which is both
+    conventions at once: GRASS writes its layer tree top first and RustGIS
+    lists its layers top first.
+
+    :param path: the workspace read from
+    :param target: the file to write, which must not be ``path``
+    :param layers: ``[{"map", "mapset", "kind", "shown", "opacity"}, ...]``
+        from the top of the stack down
+    :param extent: ``[west, south, east, north]`` in the project's own
+        system, or None to keep the display's own
+    :raises session.GrassError: when the file cannot be read or written
+    """
+    if os.path.realpath(target) == os.path.realpath(path):
+        raise session.GrassError(
+            f"{target} is the workspace itself; the plugin writes a copy, "
+            "never the file GRASS owns"
+        )
+    try:
+        tree_ = ElementTree.parse(path)
+    except (OSError, ElementTree.ParseError, ValueError) as e:
+        raise session.GrassError(f"{path} cannot be read as a workspace: {e}") from e
+    root = tree_.getroot()
+    display = root.find("display")
+    if display is None:
+        raise session.GrassError(
+            f"{path} has no map display to save layers into; it was not "
+            "written by the GRASS GUI with a display open"
+        )
+
+    had = {}
+    for element in display.findall("layer"):
+        had.setdefault((element.get("name") or "").strip(), element)
+        display.remove(element)
+    for layer in layers:
+        name = f"{layer['map']}@{layer['mapset']}"
+        element = had.get(name)
+        if element is None:
+            element = ElementTree.SubElement(display, "layer")
+            element.set("type", layer["kind"])
+            element.set("name", name)
+            task = ElementTree.SubElement(
+                element, "task", {"name": DRAWN_BY[layer["kind"]]}
+            )
+            parameter = ElementTree.SubElement(task, "parameter", {"name": "map"})
+            ElementTree.SubElement(parameter, "value").text = name
+        else:
+            display.append(element)
+        element.set("checked", "1" if layer["shown"] else "0")
+        element.set("opacity", f"{float(layer.get('opacity', 1.0)):.6f}")
+
+    if extent:
+        # GRASS writes six numbers: the box, then the height range, which
+        # belongs to the 3D view and is kept as it was.
+        heights = (display.get("extent") or "").split(",")[4:6] or ["0.0", "1.0"]
+        box = ",".join(f"{float(value):.6f}" for value in extent)
+        display.set("extent", box + "," + ",".join(heights))
+
+    ElementTree.indent(tree_, space="    ")
+    body = ElementTree.tostring(root, encoding="unicode")
+    # ElementTree drops the doctype, and GRASS's own reader expects it: the
+    # two lines GRASS writes are put back by hand.
+    text = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<!DOCTYPE gxw SYSTEM "grass-gxw.dtd">\n' + body.rstrip() + "\n"
+    )
+    temporary = f"{target}.{os.getpid()}.tmp"
+    try:
+        with open(temporary, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(temporary, target)
+    except OSError as e:
+        try:
+            os.remove(temporary)
+        except OSError:
+            pass
+        raise session.GrassError(f"{target} could not be written: {e}") from e
+    return target
+
+
+#: The file that remembers which workspace was loaded last, so that Save
+#: Workspace knows what to save without the tree still being on it.
+LOADED_FILE = "workspace_loaded.json"
+
+
+def loaded_path():
+    """Return the file that remembers the workspace loaded last."""
+    from grass_bridge import raster
+
+    return os.path.join(raster.output_dir(), LOADED_FILE)
+
+
+def remember_loaded(path):
+    """Write down the workspace just loaded; never fail a load over it."""
+    temporary = ""
+    try:
+        where = loaded_path()
+        temporary = f"{where}.{os.getpid()}.tmp"
+        with open(temporary, "w", encoding="utf-8") as f:
+            json.dump({"path": path}, f)
+        os.replace(temporary, where)
+    except OSError:
+        if temporary:
+            try:
+                os.remove(temporary)
+            except OSError:
+                pass
+    return path
+
+
+def last_loaded():
+    """Return the workspace loaded last, or "" when there is none readable."""
+    try:
+        with open(loaded_path(), encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return ""
+    path = (data or {}).get("path") if isinstance(data, dict) else ""
+    return path if isinstance(path, str) and os.path.isfile(path) else ""

@@ -394,6 +394,21 @@ COMMANDS = [
         "timeout": LONG_TIMEOUT,
     },
     {
+        "id": "data-save",
+        "label": "Save\nWorkspace",
+        "help": "Save this project's GRASS layers -- their order, their "
+        "ticks, their opacity and the view -- to a workspace beside the one "
+        "that was loaded, as <name>_rustgis.gxw. The .gxw that was read is "
+        "never written: a GRASS GUI session holding it open would rewrite it "
+        "on exit. A layer that is not a map of that GRASS project is left "
+        "out and named.",
+        "icon": "save_as",
+        "params": '{"workspace"?: "<path>.gxw" or a tree node, "to"?: '
+        '"<path>.gxw"} (without them the workspace loaded last is saved, or '
+        "the one chosen in the tree)",
+        "timeout": LONG_TIMEOUT,
+    },
+    {
         "id": "data-browse",
         "label": "Browse\nMapset",
         "help": "List the maps of the mapset chosen in the GRASS Data tree.",
@@ -635,6 +650,7 @@ PANEL = {
         },
         {"kind": "button", "command": "data-add"},
         {"kind": "button", "command": "data-workspace"},
+        {"kind": "button", "command": "data-save"},
         {"kind": "button", "command": "data-folder"},
         # 2. Layer and region.
         {
@@ -844,6 +860,8 @@ FRENCH = {
     "Add\nMap": "Ajouter\nla carte",
     "Load\nWorkspace": "Charger\nl'espace",
     "Load Workspace": "Charger l'espace de travail",
+    "Save\nWorkspace": "Enregistrer\nl'espace",
+    "Save Workspace": "Enregistrer l'espace de travail",
     "Browse\nMapset": "Parcourir\nle jeu",
     "Region =\nMap View": "Region =\nvue",
     "Region =\nWhole Layer": "Region =\ncouche",
